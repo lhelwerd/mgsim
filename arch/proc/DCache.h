@@ -47,7 +47,7 @@ private:
         bool    write;
         bool    update;       
         MemData data;
-        bool    mask[sizeof(data.data)];
+        bool    mask[MAX_MEMORY_OPERATION_SIZE];
         LFID    fid;
     };
     
