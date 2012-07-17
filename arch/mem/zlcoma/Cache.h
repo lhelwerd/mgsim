@@ -54,7 +54,6 @@ private:
         MemAddr      address;
         unsigned int client;
         LFID         fid;
-        bool         mask[MAX_MEMORY_OPERATION_SIZE];
     };
 
     IBankSelector&                m_selector;

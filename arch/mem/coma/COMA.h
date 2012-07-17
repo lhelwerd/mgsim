@@ -77,7 +77,6 @@ public:
     IBankSelector& GetBankSelector() const { return *m_selector; }
     
     size_t GetLineSize() const;
-    size_t GetNumActiveCachePeers() const {return (m_caches.size() > m_numCachesPerDir) ? m_numCachesPerDir : m_caches.size(); }
     size_t GetNumClientsPerCache() const { return m_numClientsPerCache; }    
     size_t GetNumCachesPerDirectory() const { return m_numCachesPerDir; }
     size_t GetNumCaches() const { return m_caches.size(); }

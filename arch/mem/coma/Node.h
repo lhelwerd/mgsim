@@ -56,11 +56,8 @@ protected:
             MemData      data;          ///< The data (RD, RDT, EV, UP)
             bool         dirty;         ///< Is the data dirty? (EV, RD, RDT)
             unsigned int tokens;        ///< Number of tokens in this message (RDT, EV)
-            unsigned int times;         ///< Appearance of massage
             size_t       client;        ///< Sending client (UP)
             LFID         fid;           ///< Sending family (UP)
-            bool         mask[MAX_MEMORY_OPERATION_SIZE];
-            bool         consistency;   ///< Is global consistency required
         };
         
         /// For memory management

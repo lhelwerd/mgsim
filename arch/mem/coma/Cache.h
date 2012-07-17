@@ -38,7 +38,6 @@ private:
     struct Request : public MemData
     {
         bool         write;
-        bool         mask[MAX_MEMORY_OPERATION_SIZE];
         MemAddr      address;
         unsigned int client;
         LFID         fid;
