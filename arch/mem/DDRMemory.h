@@ -1,7 +1,8 @@
-#ifndef BANKEDMEMORY_H
-#define BANKEDMEMORY_H
+#ifndef DDRMEMORY_H
+#define DDRMEMORY_H
 
 #include "BankSelector.h"
+#include "DDR.h"
 #include "arch/Memory.h"
 #include "arch/VirtualMemory.h"
 #include "sim/inspect.h"
@@ -9,21 +10,15 @@
 #include <set>
 
 class Config;
-class ComponentModelRegistry;
 
 namespace Simulator
 {
 
-class ArbitratedWriteFunction;
-
-class BankedMemory : public Object, public IMemoryAdmin, public VirtualMemory
+class DDRMemory : public Object, public IMemoryAdmin, public VirtualMemory
 {
     struct ClientInfo;
     struct Request;
-    class Bank;
-
-    std::pair<CycleNo, CycleNo> GetMessageDelay(size_t body_size) const;
-    CycleNo                     GetMemoryDelay (size_t data_size) const;
+    class Interface;
 
     // IMemory
     MCID RegisterClient(IMemoryCallback& callback, Process& process, StorageTraceSet& traces, Storage& storage, bool /*ignored*/);
@@ -32,12 +27,10 @@ class BankedMemory : public Object, public IMemoryAdmin, public VirtualMemory
     bool Write(MCID id, MemAddr address, const MemData& data, LFID fid);
 	bool CheckPermissions(MemAddr address, MemSize size, int access) const;
 
-
     // IMemoryAdmin
     void Reserve(MemAddr address, MemSize size, ProcessID pid, int perm);
     void Unreserve(MemAddr address, MemSize size);
     void UnreserveAll(ProcessID pid);
-
     void Read (MemAddr address, void* data, MemSize size);
     void Write(MemAddr address, const void* data, const bool* mask, MemSize size);
 
@@ -54,16 +47,14 @@ class BankedMemory : public Object, public IMemoryAdmin, public VirtualMemory
     }	
 
 protected:
-    ComponentModelRegistry& m_registry;
-    Clock&                  m_clock;
-    std::vector<ClientInfo> m_clients;
-    StorageTraceSet         m_storages;
-    std::vector<Bank*>      m_banks;
-    CycleNo                 m_baseRequestTime;
-    CycleNo                 m_timePerLine;
-    size_t                  m_lineSize;
-    BufferSize              m_bufferSize;
-    IBankSelector*          m_selector;
+    ComponentModelRegistry&  m_registry;
+    Clock&                   m_clock;
+    std::vector<ClientInfo>  m_clients;
+    StorageTraceSet          m_storages;
+    std::vector<Interface*>  m_ifs;
+    DDRChannelRegistry       m_ddr;
+    size_t                   m_lineSize;
+    IBankSelector*           m_selector;
 
     uint64_t m_nreads;
     uint64_t m_nread_bytes;
@@ -71,8 +62,8 @@ protected:
     uint64_t m_nwrite_bytes;
 
 public:
-    BankedMemory(const std::string& name, Object& parent, Clock& clock, Config& config, const std::string& defaultBankSelectorType);
-    ~BankedMemory();
+    DDRMemory(const std::string& name, Object& parent, Clock& clock, Config& config, const std::string& defaultInterfaceSelectorType);
+    ~DDRMemory();
     
     // Debugging
     void Cmd_Info(std::ostream& out, const std::vector<std::string>& arguments) const;

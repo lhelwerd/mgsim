@@ -444,6 +444,7 @@ public:
     Processor& GetProcessor()  const { return m_parent; }
     
     uint64_t GetTotalBusyTime() const { return m_pipelineBusyTime; }
+    uint64_t GetStalls() const { return m_nStalls; }
     uint64_t GetNStages() const { return m_stages.size(); }
     uint64_t GetStagesRun() const { return m_nStagesRun; }
     
@@ -487,6 +488,7 @@ private:
     size_t   m_nStagesRunnable;
     size_t   m_nStagesRun;
     uint64_t m_pipelineBusyTime;   
+    uint64_t m_nStalls;   
 };
 
 #endif

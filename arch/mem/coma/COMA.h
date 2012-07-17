@@ -46,6 +46,7 @@ private:
     size_t                      m_numClientsPerCache;
     size_t                      m_numCachesPerDir;
     size_t                      m_numClients;
+    size_t                      m_lineSize;
     Config&                     m_config;
     IBankSelector*              m_selector;           ///< Mapping of line addresses to set indexes
     std::vector<Cache*>         m_caches;             ///< List of caches
@@ -89,8 +90,8 @@ public:
     // IMemory
     MCID RegisterClient(IMemoryCallback& callback, Process& process, StorageTraceSet& traces, Storage& storage, bool grouped);
     void UnregisterClient(MCID id);
-    bool Read (MCID id, MemAddr address, MemSize /* unused, remove! */);
-    bool Write(MCID id, MemAddr address, const void* data, MemSize /* unused, remove! */, LFID fid, const bool* mask, bool consistency);
+    bool Read (MCID id, MemAddr address);
+    bool Write(MCID id, MemAddr address, const MemData& data, LFID fid);
     bool CheckPermissions(MemAddr address, MemSize size, int access) const;
 
     void GetMemoryStatistics(uint64_t& nreads, uint64_t& nwrites, 
@@ -107,7 +108,7 @@ public:
     void UnreserveAll(ProcessID pid);
 
     void Read (MemAddr address, void* data, MemSize size);
-    void Write(MemAddr address, const void* data, MemSize size);
+    void Write(MemAddr address, const void* data, const bool* mask, MemSize size);
 };
 
 }

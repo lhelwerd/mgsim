@@ -102,7 +102,7 @@ private:
     bool  ClearLine(Line* line);
     bool  EvictLine(Line* line, const Request& req);
     bool  AcknowledgeQueuedWrites(Line* line);
-    bool  OnReadCompleted(MemAddr addr, const MemData& data);
+    bool  OnReadCompleted(MemAddr addr, const char * data);
 
     // Processes
     Result DoRequests();
@@ -117,8 +117,8 @@ public:
 
     MCID RegisterClient  (IMemoryCallback& callback, Process& process, StorageTraceSet& traces, Storage& storage);
     void UnregisterClient(MCID id);
-    bool Read (MCID id, MemAddr address, MemSize size);
-    bool Write(MCID id, MemAddr address, const void* data, MemSize size, LFID fid, const bool* mask, bool /*consistency*/);
+    bool Read (MCID id, MemAddr address);
+    bool Write(MCID id, MemAddr address, const MemData& data, LFID fid);
 };
 
 }

@@ -38,7 +38,6 @@ private:
     struct Request : public MemData
     {
         bool         write;
-        bool         consistency;
         bool         mask[MAX_MEMORY_OPERATION_SIZE];
         MemAddr      address;
         unsigned int client;
@@ -98,7 +97,7 @@ private:
     uint64_t                      m_numStallingWCompletions;
     uint64_t                      m_numWCompletions;
     uint64_t                      m_numNetworkWHits;
-    
+
     uint64_t                      m_numStallingWSnoops;
    
     // Processes
@@ -122,7 +121,7 @@ private:
     Result OnReadRequest(const Request& req);
     Result OnWriteRequest(const Request& req);
     bool OnMessageReceived(Message* msg);
-    bool OnReadCompleted(MemAddr addr, const MemData& data);
+    bool OnReadCompleted(MemAddr addr, const char * data);
 public:
     Cache(const std::string& name, COMA& parent, Clock& clock, CacheID id, Config& config);
     
@@ -136,8 +135,8 @@ public:
     
     MCID RegisterClient  (IMemoryCallback& callback, Process& process, StorageTraceSet& traces, Storage& storage);
     void UnregisterClient(MCID id);
-    bool Read (MCID id, MemAddr address, MemSize size);
-    bool Write(MCID id, MemAddr address, const void* data, MemSize size, LFID fid, const bool* mask, bool /*consistency*/);
+    bool Read (MCID id, MemAddr address);
+    bool Write(MCID id, MemAddr address, const MemData& data, LFID fid);
 };
 
 }

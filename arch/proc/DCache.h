@@ -45,7 +45,6 @@ private:
     {
         MemAddr address;
         bool    write;
-        bool    update;       
         MemData data;
         bool    mask[MAX_MEMORY_OPERATION_SIZE];
         LFID    fid;
@@ -148,9 +147,9 @@ public:
     size_t GetLineSize() const { return m_lineSize; }
 
     // Memory callbacks
-    bool OnMemoryReadCompleted(MemAddr addr, const MemData& data);
-    bool OnMemoryWriteCompleted(LFID fid);
-    bool OnMemorySnooped(MemAddr addr, const MemData& data, bool* mask);
+    bool OnMemoryReadCompleted(MemAddr addr, const char* data);
+    bool OnMemoryWriteCompleted(LFID tid);
+    bool OnMemorySnooped(MemAddr addr, const char* data, const bool* mask);
     bool OnMemoryInvalidated(MemAddr addr);
    
     Object& GetMemoryPeer() { return m_parent; }

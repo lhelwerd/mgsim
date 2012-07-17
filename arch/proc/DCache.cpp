@@ -251,8 +251,6 @@ bool Processor::DCache::FlushWCBLine(size_t index)
     memcpy(request.data.data, wcb_line.data,(size_t)m_lineSize);
     memcpy(request.mask, wcb_line.valid,(size_t)m_lineSize);
     request.fid       =  wcb_line.fid;
-    request.update    = !m_parent.IsLocalStorage(wcb_line.fid, request.address);
-    request.data.size = m_lineSize;
         
     if (!m_outgoing.Push(request))
     {
@@ -460,7 +458,6 @@ Result Processor::DCache::Read(MemAddr address, void* data, MemSize size, RegAdd
         Request request;
         request.write     = false;
         request.address   = address - offset;
-        request.data.size = m_lineSize;
         if (!m_outgoing.Push(request))
         {
             ++m_numStallingRMisses;
@@ -568,8 +565,11 @@ Result Processor::DCache::Write(MemAddr address, void* data, MemSize size, LFID 
             // Update the line
             assert(line->state == LINE_FULL);
             COMMIT{ 
-                memcpy(line->data + offset, data, (size_t)size);
+                std::copy((char*)data, (char*)data + size, line->data + offset);
                 std::fill(line->valid + offset, line->valid + offset + size, true);
+
+                // Statistics
+                ++m_numWHits;
                }
            DebugMemWrite("Cache line update from write hit: %#16llx, F%u/T%u", (unsigned long long)address, (unsigned)fid,(unsigned)tid);
         }
@@ -586,10 +586,8 @@ Result Processor::DCache::Write(MemAddr address, void* data, MemSize size, LFID 
 
 }
 
-bool Processor::DCache::OnMemoryReadCompleted(MemAddr addr, const MemData& data)
+bool Processor::DCache::OnMemoryReadCompleted(MemAddr addr, const char* data)
 {
-    assert(data.size == m_lineSize);
-    
     // Check if we have the line and if its loading.
     // This method gets called whenever a memory read completion is put on the
     // bus from memory, so we have to check if we actually need the data.
@@ -601,44 +599,35 @@ bool Processor::DCache::OnMemoryReadCompleted(MemAddr addr, const MemData& data)
         // Registers are waiting on this data
         COMMIT
         {
-                   
-             //         Merge with pending writes because the incoming line
-            //          will not know about those yet and we don't want inconsistent
-            //          content in L1.
-            //          This is kind of a hack; it's feasibility in hardware in a single cycle
-            //          is questionable.
-            MemData mdata(data);
-            
+            /*        
+                      Merge with pending writes because the incoming line
+                      will not know about those yet and we don't want inconsistent
+                      content in L1.
+                      This is kind of a hack; it's feasibility in hardware in a single cycle
+                      is questionable.
+            */
+            char mdata[m_lineSize];
+                
+            std::copy(data, data + m_lineSize, mdata);
+
             for (Buffer<Request>::const_iterator p = m_outgoing.begin(); p != m_outgoing.end(); ++p)
             {
-              
                 if (p->write && p->address == addr)
                 {
                     // This is a write to the same line, merge it
-                    for(size_t i = 0; i <(size_t)m_lineSize; ++i)
-                    {
-                        if (p->mask[i]) 
-                        {
-                            mdata.data[i]  = p->data.data[i];
-                        }                    
-                        
-                    }
-                    DebugMemWrite("Merge outgoing buffer data with load response from 0x%016llx ", (unsigned long long)addr);
-                }
-            }       
+                    line::blit(&mdata[0], p->data.data, p->data.mask, m_lineSize);
+                }                    
+                DebugMemWrite("Merge outgoing buffer data with load response from 0x%016llx ", (unsigned long long)addr);
+                
+            }
           
             
             DebugMemWrite("Finished checking data consistency for load response from 0x%016llx ", (unsigned long long)addr);
             
             // Copy the data into the cache line.
             // Mask by valid bytes (don't overwrite already written data).
-            for (size_t i = 0; i < (size_t)m_lineSize; ++i)
-            {
-                if (!line->valid[i]) {
-                    line->data[i]  = mdata.data[i];
-                    line->valid[i] = true;
-                }
-            }
+            line::blitnot(line->data, mdata, line->valid, m_lineSize);
+            line::setifnot(line->valid, true, line->valid, m_lineSize);
             
             line->processing = true;
         }
@@ -674,9 +663,8 @@ bool Processor::DCache::OnMemoryWriteCompleted(LFID fid)
     return true;
 }
 
-bool Processor::DCache::OnMemorySnooped(MemAddr address, const MemData& data, bool* mask)
+bool Processor::DCache::OnMemorySnooped(MemAddr address, const char* data, const bool* mask)
 {
-    size_t offset = (size_t)(address % m_lineSize);
     Line*  line;
 
     // FIXME: snoops should really either lock the line or access
@@ -698,23 +686,15 @@ bool Processor::DCache::OnMemorySnooped(MemAddr address, const MemData& data, bo
     {
         COMMIT
         {
-            // We do, update the data
-           
-            
-            // Mark written bytes as valid
+            // We do, update the data and mark written bytes as valid
             // Note that we don't have to check against already written data or queued reads
             // because we don't have to guarantee sequential semantics from other cores.
             // This falls within the non-determinism behavior of the architecture.
-                       
-            
-            for (size_t i = 0; i < data.size; ++i)
-            {
-                if (mask[i + offset])
-                {
-                    line->data[i + offset]  = data.data[i + offset];
-                    line->valid[i + offset] = true;
-                }               
-            }
+            line::blit(line->data, data, mask, m_lineSize);
+            line::setif(line->valid, true, mask, m_lineSize);
+
+            // Statistics
+            ++m_numSnoops;
             
             DebugMemWrite("Cache line update from snoop: 0x%016llx ", (unsigned long long)address);
         }
@@ -723,24 +703,24 @@ bool Processor::DCache::OnMemorySnooped(MemAddr address, const MemData& data, bo
         //Update WCB with dropping valid bytes if matched
     
     MemAddr tag;
-    size_t index,count = 0;
-    m_wcbselect->Map((address - offset) / m_lineSize, tag, index);
+    size_t index;
+    m_wcbselect->Map(address / m_lineSize, tag, index);
     
     WCB_Line& wcb_line = m_wcblines[index]; 
     if (!wcb_line.free && wcb_line.tag == tag)
     {
         COMMIT{
 
-            for (size_t i = 0; i < data.size; ++i)
-            {
-                if (wcb_line.valid[i + offset] && mask[ i + offset])
-                {
-                    wcb_line.valid[i + offset] = false;                    
-                    count++;
-                }               
-            }
+            line::setif(wcb_line.valid, false, mask, m_lineSize);
             
-            if(count == m_lineSize)
+            // FIXME: this is an optimization, check
+            // for rewriting outside of COMMIT block?
+            size_t i;
+            for (i = 0; i < m_lineSize; ++i)
+                if (wcb_line.valid[i])
+                    break;
+            
+            if(i == m_lineSize)
                 wcb_line.free = true;
         }
         
@@ -949,31 +929,22 @@ Result Processor::DCache::DoOutgoingRequests()
 {
     assert(!m_outgoing.Empty());
     const Request& request = m_outgoing.Front();
-    
-    if (request.data.size > m_lineSize || request.data.size > MAX_MEMORY_OPERATION_SIZE)
-    {
-        throw InvalidArgumentException("Dcache Outgoing request size is too big");
-    }
-    
-    if (request.address / m_lineSize != (request.address + request.data.size - 1) / m_lineSize)
-    {
-        throw InvalidArgumentException("Dcache Outgoing request straddles cache-line boundary");
-    }
 
+    assert(request.address % m_lineSize == 0);
     
     if (request.write)
     {
-        if (!m_memory.Write(m_mcid, request.address, request.data.data, request.data.size, request.fid, request.mask, request.update))
+        if (!m_memory.Write(m_mcid, request.address, request.data, request.fid))
         {
-            DeadlockWrite("Unable to send write of %u bytes to 0x%016llx to memory", (unsigned)request.data.size, (unsigned long long)request.address);
+            DeadlockWrite("Unable to send write to 0x%016llx to memory", (unsigned long long)request.address);
             return FAILED;
         }
     }
     else
     {
-        if (!m_memory.Read(m_mcid, request.address, request.data.size))
+        if (!m_memory.Read(m_mcid, request.address))
         {
-            DeadlockWrite("Unable to send read of %u bytes to 0x%016llx to memory", (unsigned)request.data.size, (unsigned long long)request.address);
+            DeadlockWrite("Unable to send read to 0x%016llx to memory", (unsigned long long)request.address);
             return FAILED;
         }
     }
@@ -1071,7 +1042,7 @@ void Processor::DCache::Cmd_Read(std::ostream& out, const std::vector<std::strin
                 << "Number of write requests from client:                           " << m_numWAccesses << endl
                 << "Breakdown of writes:" << endl
                 << "- to a loaded line with same tag:                               " << PRINTVAL(m_numWHits, w_factor) << endl
-                << "- to a wcb line with different tag : "                            << PRINTVAL( m_wcbConflicts, w_factor) << endl
+                << "- to a wcb line with different tag:                             " << PRINTVAL( m_wcbConflicts, w_factor) << endl
                 << "(percentages relative to " << m_numWAccesses << " write requests)" << endl
                 << endl;
             
@@ -1114,18 +1085,17 @@ void Processor::DCache::Cmd_Read(std::ostream& out, const std::vector<std::strin
     else if (arguments[0] == "buffers")
     {
         out << endl << "Outgoing requests:" << endl << endl
-            << "      Address      | Size |  Type |                 Value (writes)                 " << endl
-            << "-------------------+------+-------+------------------------------------------------" << endl;
+            << "      Address      | Type  | Value (writes)" << endl
+            << "-------------------+-------+-------------------------" << endl;
         for (Buffer<Request>::const_iterator p = m_outgoing.begin(); p != m_outgoing.end(); ++p)
         {
             out << hex << "0x" << setw(16) << setfill('0') << p->address << " | "
-                << dec << setw(4) << right << setfill(' ') << p->data.size << " | "
                 << (p->write ? "Write" : "Read ") << " |";
             if (p->write)
             {
                 out << hex << setfill('0');
                 static const int BYTES_PER_LINE = 16;
-                for (size_t y = 0; y < p->data.size; y += BYTES_PER_LINE)
+                for (size_t y = 0; y < m_lineSize; y += BYTES_PER_LINE)
                 {
                     for (size_t x = y; x < y + BYTES_PER_LINE; ++x)
                     {
@@ -1134,13 +1104,13 @@ void Processor::DCache::Cmd_Read(std::ostream& out, const std::vector<std::strin
                             out<< setw(2) << (unsigned)(unsigned char)p->data.data[x];
                         }
                         else {
-                                out << "  ";
+                            out << "--";
                         }
                     }             
                     
-                    if (y + BYTES_PER_LINE < p->data.size) {
+                    if (y + BYTES_PER_LINE < m_lineSize) {
                         // This was not yet the last line
-                        out << endl << "                   |      |       |";
+                        out << endl << "                   |       |";
                     }
                 }
                 out << endl << "-------------------+------+-------+------------------------------------------------" << endl;

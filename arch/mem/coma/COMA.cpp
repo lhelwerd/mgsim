@@ -68,31 +68,26 @@ void COMA::UnregisterClient(MCID id)
     m_clientMap[id].first->UnregisterClient(m_clientMap[id].second);
 }
 
-bool COMA::Read(MCID id, MemAddr address, MemSize size)
+bool COMA::Read(MCID id, MemAddr address)
 {
     COMMIT
     {
         m_nreads++;
-        m_nread_bytes += size;
+        m_nread_bytes += m_lineSize;
     }
     // Forward the read to the cache associated with the callback
-    return m_clientMap[id].first->Read(m_clientMap[id].second, address, size);
+    return m_clientMap[id].first->Read(m_clientMap[id].second, address);
 }
 
-bool COMA::Write(MCID id, MemAddr address, const void* data, MemSize size, LFID fid, const bool* mask, bool consistency)
+bool COMA::Write(MCID id, MemAddr address, const MemData& data, LFID fid)
 {
-    // Until the write protocol is figured out, do magic coherence!
-    COMMIT { 
-        ++m_nwrites;
-        for(size_t i = 0; i < sizeof(mask); i++)
-        {
-            if(mask[i])
-                m_nwrite_bytes++;
-            
-        }
+    COMMIT
+    {
+        m_nwrites++;
+        m_nwrite_bytes += m_lineSize;
     }
     // Forward the write to the cache associated with the callback
-    return m_clientMap[id].first->Write(m_clientMap[id].second, address, data, size, fid, mask, consistency);
+    return m_clientMap[id].first->Write(m_clientMap[id].second, address, data, fid);
 }
 
 void COMA::Reserve(MemAddr address, MemSize size, ProcessID pid, int perm)
@@ -115,9 +110,9 @@ void COMA::Read(MemAddr address, void* data, MemSize size)
     return VirtualMemory::Read(address, data, size);
 }
 
-void COMA::Write(MemAddr address, const void* data, MemSize size)
+void COMA::Write(MemAddr address, const void* data, const bool* mask, MemSize size)
 {
-	return VirtualMemory::Write(address, data, size);
+    return VirtualMemory::Write(address, data, mask, size);
 }
 
 bool COMA::CheckPermissions(MemAddr address, MemSize size, int access) const
@@ -133,11 +128,12 @@ COMA::COMA(const std::string& name, Simulator::Object& parent, Clock& clock, Con
     m_numClientsPerCache(config.getValue<size_t>("NumClientsPerL2Cache")),
     m_numCachesPerDir (config.getValue<size_t>(*this, "NumL2CachesPerDirectory")),
     m_numClients(0),
+    m_lineSize(config.getValue<size_t>("CacheLineSize")),
     m_config(config),
     m_selector(IBankSelector::makeSelector(*this,
                                            config.getValueOrDefault<string>(*this, "BankSelector", "XORFOLD"),
                                            config.getValue<size_t>(*this, "L2CacheNumSets"))),
-    m_ddr("ddr", *this, *this, config, config.getValue<size_t>(*this, "NumRootDirectories")),
+    m_ddr("ddr", *this, config, config.getValue<size_t>(*this, "NumRootDirectories")),
     m_nreads(0), m_nwrites(0), m_nread_bytes(0), m_nwrite_bytes(0)
 {
 

@@ -1036,6 +1036,9 @@ bool Processor::Allocator::QueueFamilyAllocation(const RemoteMessage& msg, bool 
     // the network before it gets here.
     assert(msg.allocate.type != ALLOCATE_BALANCED);
     
+    // Can't be exclusive and non-single.
+    assert(!msg.allocate.exclusive || msg.allocate.type == ALLOCATE_SINGLE);
+    
     // Place the request in the appropriate buffer
     AllocRequest request;
     request.first_fid      = INVALID_LFID;
@@ -1509,8 +1512,6 @@ Result Processor::Allocator::DoBundle()
     }
     else if (m_bundleState == BUNDLE_LINE_LOADED)
     {     
-       //size_t offset                  = (size_t) info.addr % sizeof(m_bundleData);   
-        
         RemoteMessage msg;
         msg.type                       = RemoteMessage::MSG_BUNDLE;
         
@@ -1523,7 +1524,7 @@ Result Processor::Allocator::DoBundle()
         
         msg.allocate.completion_reg    = info.completion_reg;
         msg.allocate.completion_pid    = m_parent.GetPID();
-        msg.allocate.type              = ALLOCATE_EXACT;
+        msg.allocate.type              = ALLOCATE_SINGLE;
         msg.allocate.suspend           = true;
         msg.allocate.exclusive         = true;
         msg.allocate.bundle.pc         = UnserializeRegister(RT_INTEGER, &m_bundleData[sizeof(Integer) ], sizeof(MemAddr));

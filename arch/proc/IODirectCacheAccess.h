@@ -19,9 +19,10 @@ public:
     struct Request 
     {
         IODeviceID  client;
-        MemAddr     address;
         RequestType type;
-        MemData     data;
+        MemAddr     address;
+        MemSize     size;
+        char        data[MAX_MEMORY_OPERATION_SIZE];
     };
 
 private:
@@ -29,7 +30,8 @@ private:
     struct Response
     {
         MemAddr address;
-        MemData data;
+        MemSize     size;
+        char        data[MAX_MEMORY_OPERATION_SIZE];
     };
 
     Processor&           m_cpu;
@@ -66,9 +68,9 @@ public:
     Result DoMemoryOutgoing();
     Result DoBusOutgoing();
 
-    bool OnMemoryReadCompleted(MemAddr addr, const MemData& data) ;
+    bool OnMemoryReadCompleted(MemAddr addr, const char* data) ;
     bool OnMemoryWriteCompleted(TID tid);
-    bool OnMemorySnooped(MemAddr /*unused*/, const MemData& /*unused*/, bool* /*unused*/) { return true; }
+    bool OnMemorySnooped(MemAddr /*unused*/, const char* /*data*/, const bool* /*mask*/) { return true; }
     bool OnMemoryInvalidated(MemAddr /*unused*/) { return true; }
 
     Object& GetMemoryPeer() { return m_cpu; }
