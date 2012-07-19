@@ -46,7 +46,6 @@ private:
         MemAddr address;
         bool    write;
         MemData data;
-        bool    mask[MAX_MEMORY_OPERATION_SIZE];
         LFID    fid;
     };
     

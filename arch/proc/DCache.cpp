@@ -1142,7 +1142,7 @@ void Processor::DCache::Cmd_Read(std::ostream& out, const std::vector<std::strin
                         if (wcb_line.valid[x]) {
                             out << setw(2) << (unsigned)(unsigned char)wcb_line.data[x];
                         } else {
-                           out << "  ";
+                           out << "--";
                         }
                     }             
                                     
