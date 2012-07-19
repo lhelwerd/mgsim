@@ -449,20 +449,6 @@ MemSize Processor::GetTLSSize() const
     return static_cast<MemSize>(1) << (sizeof(MemSize) * 8 - (1 + m_bits.pid_bits + m_bits.tid_bits));
 }
 
-
-bool Processor::IsLocalStorage(LFID fid, MemAddr address) const
-{
-    if(address < GetTLSAddress(fid,0) || address >= (GetTLSAddress(fid,(1 << m_bits.tid_bits) - 1) + GetTLSSize()))
-        return false;
-    
-    return true;
-}
-
-/*bool Processor::GetMemConsistency(LFID fid, MemAddr address) const
-{
-    return   m_familyTable[fid].hasShareds | IsLocalStorage(fid,address);
-}*/
-
 static Integer GenerateCapability(unsigned int bits)
 {
     Integer capability = 0;
