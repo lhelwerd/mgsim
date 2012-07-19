@@ -31,6 +31,15 @@ public:
         bool        create;
     };
 
+    struct WCB_Line
+    {
+        MemAddr     tag;
+        WClientID   wid;
+        char*       data;
+        bool*       valid;
+        bool        free;
+    };
+
 private:
     struct Request
     {
@@ -71,13 +80,17 @@ private:
     std::vector<Line>    m_lines;           ///< The cache-lines.
 	size_t               m_assoc;           ///< Config: Cache associativity.
 	size_t               m_sets;            ///< Config: Number of sets in the cace.
+        size_t               m_wcbsize;         ///< Config: Size of write-combine buffer.
 	size_t               m_lineSize;        ///< Config: Size of a cache line, in bytes.
     IBankSelector*       m_selector;        ///< Mapping of cache line addresses to tags and set indices.
+    IBankSelector*       m_wcbselect;       ///< Mapping of WCB line addresses to tags and set indices.
     Buffer<CID>          m_completed;       ///< Completed cache-line reads waiting to be processed.
+    Buffer<WClientID>    m_wcbtoflush;      ///< Write clients waiting on flush of their WCB lines.
     Buffer<Response>     m_incoming;        ///< Incoming buffer from memory bus.
     Buffer<Request>      m_outgoing;        ///< Outgoing buffer to memory bus.
     WritebackState       m_wbstate;         ///< Writeback state
 
+    std::vector<WCB_Line>    m_wcblines;    ///< The write combine buffer lines.
 
     // Statistics
 
@@ -91,6 +104,10 @@ private:
 
     uint64_t             m_numWAccesses;
     uint64_t             m_numWHits;
+
+    uint64_t             m_wcbConflicts;
+    uint64_t             m_wcbFlushes;
+
     uint64_t             m_numPassThroughWMisses;
     uint64_t             m_numLoadingWMisses;
 
@@ -99,10 +116,13 @@ private:
 
     uint64_t             m_numSnoops;
 
-       
     Result DoCompletedReads();
     Result DoIncomingResponses();
     Result DoOutgoingRequests();
+    Result DoWCBFlush  ();
+    void  ReadWCB(MemAddr address, Line* line);
+    bool   WriteWCB(MemAddr address, MemSize size, void* data, LFID fid, TID tid);
+    bool   FlushWCBLine(size_t index);
 
 public:
     DCache(const std::string& name, Processor& parent, Clock& clock, Allocator& allocator, FamilyTable& familyTable, RegisterFile& regFile, IMemory& memory, Config& config);
@@ -112,12 +132,15 @@ public:
     Process p_CompletedReads;
     Process p_Incoming;
     Process p_Outgoing;
+    Process p_WCBFlush;
 
     ArbitratedService<> p_service;
 
     // Public interface
     Result Read (MemAddr address, void* data, MemSize size, RegAddr* reg);
     Result Write(MemAddr address, void* data, MemSize size, LFID fid, TID tid);
+    bool   WClienttoFlush(WClientID wid);
+    bool   FlushWCBInWClient(WClientID wid);
 
     size_t GetLineSize() const { return m_lineSize; }
 
@@ -137,6 +160,7 @@ public:
     size_t GetAssociativity() const { return m_assoc; }
     size_t GetNumLines()      const { return m_lines.size(); }
     size_t GetNumSets()       const { return m_sets; }
+    size_t GetWCBSize()       const { return m_wcbsize; }
 
     const Line& GetLine(size_t i) const { return m_lines[i];  }
 };
