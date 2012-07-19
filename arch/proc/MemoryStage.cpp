@@ -271,6 +271,16 @@ Processor::Pipeline::PipeAction Processor::Pipeline::MemoryStage::OnCycle()
             }
         }
     }
+    else if (m_input.suspend == SUSPEND_MEMORY_BARRIER)
+    {
+        if (!m_dcache.FlushWCBInWClient(m_input.tid))
+        {
+            DeadlockWrite("F%u/T%u(%llu) %s unable to flush WCB",
+                          (unsigned)m_input.fid, (unsigned)m_input.tid, (unsigned long long)m_input.logical_index,
+                          m_input.pc_sym);
+            return PIPE_STALL;
+        }
+    }
 
     COMMIT
     {
