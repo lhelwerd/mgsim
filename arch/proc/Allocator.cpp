@@ -533,14 +533,7 @@ bool Processor::Allocator::DecreaseFamilyDependency(LFID fid, FamilyDependency d
         if (deps->numThreadsAllocated == 0 && deps->allocationDone)
         {
             COMMIT{ family->state = FST_TERMINATED; }
-            DebugSimWrite("F%u terminated", (unsigned)fid);
-                
-            if(!m_dcache.FlushWCBInWClient(fid))
-            {
-                DeadlockWrite(" Failed Queueing F%u to flush pending writes in WCB at family termination",(unsigned)fid);       
-                return false;
-            }
-          
+            DebugSimWrite("F%u terminated", (unsigned)fid);                
         } 
         // Fall through
     case FAMDEP_OUTSTANDING_WRITES:
@@ -566,7 +559,7 @@ bool Processor::Allocator::DecreaseFamilyDependency(LFID fid, FamilyDependency d
     case FAMDEP_PREV_SYNCHRONIZED:
     case FAMDEP_OUTSTANDING_READS:    
         if (deps->numThreadsAllocated == 0 && deps->allocationDone &&
-            deps->numPendingReads    == 0 && (!m_dcache.WClienttoFlush(fid) && deps->numPendingWrites== 0)
+            deps->numPendingReads    == 0 && deps->numPendingWrites == 0
             &&  deps->prevSynchronized)
         {
             // Forward synchronization token
@@ -616,7 +609,7 @@ bool Processor::Allocator::DecreaseFamilyDependency(LFID fid, FamilyDependency d
     case FAMDEP_SYNC_SENT:
     case FAMDEP_DETACHED:
         if (deps->numThreadsAllocated == 0 && deps->allocationDone &&
-            deps->numPendingReads     == 0 && (!m_dcache.WClienttoFlush(fid) && deps->numPendingWrites== 0) && 
+            deps->numPendingReads     == 0 && deps->numPendingWrites == 0 && 
             deps->prevSynchronized && deps->detached && deps->syncSent)
         {
             ContextType context = m_familyTable.IsExclusive(fid) ? CONTEXT_EXCLUSIVE : CONTEXT_NORMAL;
@@ -654,10 +647,7 @@ bool Processor::Allocator::IncreaseFamilyDependency(LFID fid, FamilyDependency d
             case FAMDEP_MEMBARRIER: 
             {
                 assert(!deps.hasBarrier);
-                if(BarrierFam(fid))
-                {
-                    deps.hasBarrier = true;
-                }
+                deps.hasBarrier = true;
                 break;
             }
             default:                           assert(0); break;

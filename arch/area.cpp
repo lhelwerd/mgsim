@@ -602,20 +602,9 @@ void Simulator::MGSystem::DumpArea(std::ostream& os, unsigned int tech) const
             1
         };
         
-        static const tcache_desc wcb = {
-            "wcb",
-            {dcache.GetWCBSize(), 1,
-                cfg.bits_MemAddr - ilog2(dcache.GetLineSize()) - ilog2(dcache.GetWCBSize()) + /*extra*/ 2 + 1 + cfg.bits_RegAddr,
-                dcache.GetLineSize() + (dcache.GetLineSize() + cfg.bits_LFID + 1)/ 8, /* data + LFID + free + valid bitmask */
-                0, 0, 1    /* R/W port for proc->mem */
-            },
-            1
-        };
-
         static const tcache_desc* caches[] = {
             &l1_icache,
             &l1_dcache,
-            &wcb,
         };
     
         for (size_t i = 0; i < sizeof caches / sizeof caches[0]; ++i)
