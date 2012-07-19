@@ -217,27 +217,34 @@ Processor::Pipeline::PipeAction Processor::Pipeline::ExecuteStage::SetFamilyProp
 Processor::Pipeline::PipeAction Processor::Pipeline::ExecuteStage::ExecCreate(const FID& fid, MemAddr address, RegIndex completion)
 {
     // Create
-    if (m_allocator.CheckFamilyDependency(m_input.fid, FAMDEP_MEMBARRIER) || m_allocator.CheckFamilyDependency(m_input.fid,FAMDEP_OUTSTANDING_WRITES))
+    if (m_allocator.CheckFamilyDependency(m_input.fid, FAMDEP_MEMBARRIER) 
+        || m_allocator.CheckFamilyDependency(m_input.fid, FAMDEP_OUTSTANDING_WRITES))
     {
         // We need to wait for the pending writes to complete
-        COMMIT
+        if (!m_allocator.CheckFamilyDependency(m_input.fid, FAMDEP_MEMBARRIER))
         {
-            m_output.pc      = m_input.pc;
-            m_output.suspend = m_allocator.CheckFamilyDependency(m_input.fid, FAMDEP_MEMBARRIER)? SUSPEND_MEMORY_STORE : SUSPEND_MEMORY_BARRIER;
-            if(m_output.suspend == SUSPEND_MEMORY_BARRIER)
+            // This is the first thread reaching the barrier.
+            if(!m_allocator.IncreaseFamilyDependency(m_input.fid, FAMDEP_MEMBARRIER))
             {
-                if(!m_allocator.IncreaseFamilyDependency(m_input.fid,FAMDEP_MEMBARRIER))
-                {
-                    return PIPE_STALL;
-                }
-                
-                DebugSimWrite("F%u: Set memory barrier due to creation from child T%u", (unsigned)m_input.fid, (unsigned)m_input.tid);
-            
+                return PIPE_STALL;
             }
+            
+            DebugSimWrite("F%u: Set memory barrier due to creation from T%u", (unsigned)m_input.fid, (unsigned)m_input.tid);
+            COMMIT{ m_output.suspend = SUSPEND_MEMORY_BARRIER; }
+            
+        }
+        else 
+        {
+            COMMIT{ m_output.suspend = SUSPEND_MEMORY_STORE; }
+        }
+        
+        COMMIT{
+            m_output.pc      = m_input.pc;
             m_output.swch    = true;
             m_output.kill    = false;
             m_output.Rc      = INVALID_REG;
         }
+
         return PIPE_FLUSH;
     }
     

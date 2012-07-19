@@ -1297,24 +1297,27 @@ Processor::Pipeline::PipeAction Processor::Pipeline::ExecuteStage::ExecuteInstru
             case A_MISCFUNC_MB:
             case A_MISCFUNC_WMB:
                 // Memory barrier,suspend thread at output PC
-                COMMIT {
-                               
-                    m_output.suspend = SUSPEND_MEMORY_STORE;
-                    if(!m_allocator.CheckFamilyDependency(m_input.fid, FAMDEP_MEMBARRIER))
+                if(!m_allocator.CheckFamilyDependency(m_input.fid, FAMDEP_MEMBARRIER))
+                {
+                    // This is the first thread reaching the barrier.
+                    if(!m_allocator.IncreaseFamilyDependency(m_input.fid, FAMDEP_MEMBARRIER))
                     {
-                        if(!m_allocator.IncreaseFamilyDependency(m_input.fid,FAMDEP_MEMBARRIER))
-                        {
-                            return PIPE_STALL;
-                        }
-                        
-                        m_output.suspend = SUSPEND_MEMORY_BARRIER;
-                                               
+                        return PIPE_STALL;
                     }
-                        
+                    
+                    COMMIT{  m_output.suspend = SUSPEND_MEMORY_BARRIER; }
+                    
+                }
+                else
+                {
+                    // Every other thread suspends as if it was operating a store.
+                    COMMIT{ m_output.suspend = SUSPEND_MEMORY_STORE; }
+                }
+                
+                COMMIT{
                     m_output.swch    = true;
                     m_output.kill    = false;
                     m_output.Rc      = INVALID_REG;
-                        
                 }
                return PIPE_FLUSH;
                 
