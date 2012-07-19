@@ -278,7 +278,7 @@ Processor::Pipeline::PipeAction Processor::Pipeline::MemoryStage::OnCycle()
     else if(m_input.suspend == SUSPEND_MEMORY_BARRIER && m_allocator.CheckFamilyDependency(m_input.fid, FAMDEP_MEMBARRIER))
     {
         
-        if(!m_dcache.FlushWCBInFam(m_input.fid))
+        if(!m_dcache.FlushWCBInWClient(m_input.fid))
         {
             DeadlockWrite("F%u/T%u(%llu) %s unable to flush WCB",
                           (unsigned)m_input.fid, (unsigned)m_input.tid, (unsigned long long)m_input.logical_index,

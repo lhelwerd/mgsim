@@ -40,7 +40,7 @@ private:
         bool         write;
         MemAddr      address;
         unsigned int client;
-        LFID         fid;
+        WClientID    wid;
     };
 
     IBankSelector&                m_selector;
@@ -96,7 +96,6 @@ private:
     uint64_t                      m_numStallingWCompletions;
     uint64_t                      m_numWCompletions;
     uint64_t                      m_numNetworkWHits;
-
     uint64_t                      m_numStallingWSnoops;
    
     // Processes
@@ -135,7 +134,7 @@ public:
     MCID RegisterClient  (IMemoryCallback& callback, Process& process, StorageTraceSet& traces, Storage& storage);
     void UnregisterClient(MCID id);
     bool Read (MCID id, MemAddr address);
-    bool Write(MCID id, MemAddr address, const MemData& data, LFID fid);
+    bool Write(MCID id, MemAddr address, const MemData& data, WClientID wid);
 };
 
 }

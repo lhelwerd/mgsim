@@ -220,7 +220,7 @@ namespace Simulator
         case READ:
         {
             // this is a read request coming from the bus.
-            
+
             if (req.size > m_lineSize || req.size > MAX_MEMORY_OPERATION_SIZE)
             {
                 throw InvalidArgumentException("Read size is too big");
@@ -299,7 +299,7 @@ namespace Simulator
                 std::fill(mdata.mask + offset + req.size, mdata.mask + m_lineSize, false);
             }
 
-            if (!m_memory.Write(m_mcid, line_address, mdata, INVALID_LFID))
+            if (!m_memory.Write(m_mcid, line_address, mdata, INVALID_WCLIENTID))
             {
                 DeadlockWrite("Unable to send DCA write to %#016llx/%u to memory", (unsigned long long)req.address, (unsigned)req.size);
                 return FAILED;

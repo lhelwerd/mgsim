@@ -22,7 +22,7 @@ struct DDRMemory::Request
     bool        write;
     MemAddr     address;
     MemData     data;
-    LFID        fid;
+    WClientID   wid;
 };
 
 class DDRMemory::Interface : public Object, public DDRChannel::ICallback
@@ -121,7 +121,7 @@ public:
                 return FAILED;
             }
             
-            if (!req.client->callback->OnMemoryWriteCompleted(req.fid)) {
+            if (!req.client->callback->OnMemoryWriteCompleted(req.wid)) {
                 return FAILED;
             }
 
@@ -329,7 +329,7 @@ bool DDRMemory::Read(MCID id, MemAddr address)
     return true;
 }
 
-bool DDRMemory::Write(MCID id, MemAddr address, const MemData& data, LFID fid)
+bool DDRMemory::Write(MCID id, MemAddr address, const MemData& data, WClientID wid)
 {
     assert(address % m_lineSize == 0);
     
@@ -339,7 +339,7 @@ bool DDRMemory::Write(MCID id, MemAddr address, const MemData& data, LFID fid)
     Request request;
     request.address   = address;
     request.client    = &m_clients[id];
-    request.fid       = fid;
+    request.wid       = wid;
     request.write     = true;
     COMMIT{
     std::copy(data.data, data.data + m_lineSize, request.data.data);

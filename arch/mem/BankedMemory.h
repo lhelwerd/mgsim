@@ -29,9 +29,8 @@ class BankedMemory : public Object, public IMemoryAdmin, public VirtualMemory
     MCID RegisterClient(IMemoryCallback& callback, Process& process, StorageTraceSet& traces, Storage& storage, bool /*ignored*/);
     void UnregisterClient(MCID id);
     bool Read (MCID id, MemAddr address);
-    bool Write(MCID id, MemAddr address, const MemData& data, LFID fid);
-	bool CheckPermissions(MemAddr address, MemSize size, int access) const;
-
+    bool Write(MCID id, MemAddr address, const MemData& data, WClientID wid);
+    bool CheckPermissions(MemAddr address, MemSize size, int access) const;
 
     // IMemoryAdmin
     void Reserve(MemAddr address, MemSize size, ProcessID pid, int perm);

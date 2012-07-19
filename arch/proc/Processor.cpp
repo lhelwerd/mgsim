@@ -223,7 +223,7 @@ void Processor::Initialize(Processor* prev, Processor* next)
         /* THREADDEP_PREV_CLEANED_UP */ (opt(m_dcache.m_outgoing) ^ opt(m_allocator.m_cleanup) * 
         /* FAMDEP_THREAD_COUNT */        opt(m_network.m_link.out ^ m_network.m_syncs ^
         /* AllocateThread */                 m_allocator.m_readyThreads2)) ^
-        /* FAMDEP_ALLOCATION_DONE */    (opt(m_dcache.m_famflush) * opt(m_network.m_link.out ^ m_network.m_syncs) *
+        /* FAMDEP_ALLOCATION_DONE */    (opt(m_dcache.m_wcbtoflush) * opt(m_network.m_link.out ^ m_network.m_syncs) *
         /* AllocateThread */             opt(m_allocator.m_readyThreads2)) );
 
     m_allocator.p_FamilyAllocate.SetStorageTraces(
@@ -253,7 +253,7 @@ void Processor::Initialize(Processor* prev, Processor* next)
         /* Thread wakeup */ opt(m_allocator.m_readyThreads2) *
         /* Family sync */   opt(m_network.m_link.out ^ m_network.m_syncs) );
     
-    m_dcache.p_FamFlush.SetStorageTraces(opt(m_dcache.m_outgoing));
+    m_dcache.p_WCBFlush.SetStorageTraces(opt(m_dcache.m_outgoing));
     
     // m_dcache.p_Outgoing is set in the memory
 
@@ -266,7 +266,7 @@ void Processor::Initialize(Processor* prev, Processor* next)
     
     StorageTraceSet pls_memory =
         m_dcache.m_outgoing ^ // outgoing L1 request
-        m_dcache.m_famflush ;  // memory barrier
+        m_dcache.m_wcbtoflush ;  // memory barrier
 
     if (m_io_if != NULL)
     {

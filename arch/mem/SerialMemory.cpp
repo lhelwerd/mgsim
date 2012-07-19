@@ -55,7 +55,7 @@ bool SerialMemory::Read(MCID id, MemAddr address)
     return true;
 }
 
-bool SerialMemory::Write(MCID id, MemAddr address, const MemData& data, LFID fid)
+bool SerialMemory::Write(MCID id, MemAddr address, const MemData& data, WClientID wid)
 {
     assert(address % m_lineSize == 0);
 
@@ -70,7 +70,7 @@ bool SerialMemory::Write(MCID id, MemAddr address, const MemData& data, LFID fid
     Request request;
     request.callback  = m_clients[id];
     request.address   = address;
-    request.fid       = fid;
+    request.wid       = wid;
     request.write     = true;
     COMMIT{
     std::copy(data.data, data.data + m_lineSize, request.data.data);
@@ -141,11 +141,11 @@ Result SerialMemory::DoRequests()
 
                 VirtualMemory::Write(request.address, request.data.data, request.data.mask, m_lineSize);
 
-                if (!request.callback->OnMemoryWriteCompleted(request.fid))
+                if (!request.callback->OnMemoryWriteCompleted(request.wid))
                 {
                     return FAILED;
                 }
-                COMMIT { 
+                COMMIT {
                     ++m_nwrites;
                     m_nwrite_bytes += m_lineSize;
                 }

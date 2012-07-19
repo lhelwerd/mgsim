@@ -30,11 +30,11 @@ public:
         RegAddr     waiting;    ///< First register waiting on this line.
         bool        create;
     };
-    
+
     struct WCB_Line
     {
         MemAddr     tag;
-        LFID        fid;
+        WClientID   wid;
         char*       data;
         bool*       valid;
         bool        free;
@@ -46,14 +46,14 @@ private:
         MemAddr address;
         bool    write;
         MemData data;
-        LFID    fid;
+        WClientID wid;
     };
     
     struct Response
     {
         bool write;
         union {
-            LFID fid;
+            WClientID wid;
             CID cid;
         };
     };
@@ -78,22 +78,22 @@ private:
 	IMemory&             m_memory;          ///< Memory
 	MCID                 m_mcid;            ///< Memory Client ID
     std::vector<Line>    m_lines;           ///< The cache-lines.
-    size_t               m_assoc;           ///< Config: Cache associativity.
+	size_t               m_assoc;           ///< Config: Cache associativity.
 	size_t               m_sets;            ///< Config: Number of sets in the cace.
-    size_t               m_wcbsize;         ///< Config: Numger of sets in the WCB
+        size_t               m_wcbsize;         ///< Config: Size of write-combine buffer.
 	size_t               m_lineSize;        ///< Config: Size of a cache line, in bytes.
     IBankSelector*       m_selector;        ///< Mapping of cache line addresses to tags and set indices.
-    IBankSelector*       m_wcbselect;       ///< Mapping of wcb line addresses to tags and set indices.
+    IBankSelector*       m_wcbselect;       ///< Mapping of WCB line addresses to tags and set indices.
     Buffer<CID>          m_completed;       ///< Completed cache-line reads waiting to be processed.
-    Buffer<LFID>         m_famflush;        ///< WCB line of family to be flushed away.
+    Buffer<WClientID>    m_wcbtoflush;      ///< Write clients waiting on flush of their WCB lines.
     Buffer<Response>     m_incoming;        ///< Incoming buffer from memory bus.
     Buffer<Request>      m_outgoing;        ///< Outgoing buffer to memory bus.
     WritebackState       m_wbstate;         ///< Writeback state
-    std::vector<WCB_Line>    m_wcblines; ///< The write combine buffer lines.
 
+    std::vector<WCB_Line>    m_wcblines;    ///< The write combine buffer lines.
 
     // Statistics
-    
+
     uint64_t             m_numRHits;
     uint64_t             m_numDelayedReads;
     uint64_t             m_numEmptyRMisses;
@@ -104,24 +104,25 @@ private:
 
     uint64_t             m_numWAccesses;
     uint64_t             m_numWHits;
+
+    uint64_t             m_wcbConflicts;
+    uint64_t             m_wcbFlushes;
+
+    uint64_t             m_numPassThroughWMisses;
     uint64_t             m_numLoadingWMisses;
 
     uint64_t             m_numStallingRMisses;
     uint64_t             m_numStallingWMisses;
 
     uint64_t             m_numSnoops;
-    
-    uint64_t             m_wcbConflicts;      ///< Number of WCB whits so far.
-    uint64_t             m_wcbFlushes;        ///< Number of WCB flushes so far.
-       
+
     Result DoCompletedReads();
     Result DoIncomingResponses();
     Result DoOutgoingRequests();
-    Result DoFamFlush  ();
+    Result DoWCBFlush  ();
     void  ReadWCB(MemAddr address, Line* line);
-    bool   WriteWCB(MemAddr address, MemSize size, void* data, LFID fid);
+    bool   WriteWCB(MemAddr address, MemSize size, void* data, LFID fid, TID tid);
     bool   FlushWCBLine(size_t index);
-       
 
 public:
     DCache(const std::string& name, Processor& parent, Clock& clock, Allocator& allocator, FamilyTable& familyTable, RegisterFile& regFile, IMemory& memory, Config& config);
@@ -131,26 +132,24 @@ public:
     Process p_CompletedReads;
     Process p_Incoming;
     Process p_Outgoing;
-    Process p_FamFlush;
+    Process p_WCBFlush;
 
     ArbitratedService<> p_service;
 
     // Public interface
-    Result Read (MemAddr address, void* data, MemSize size,RegAddr* reg);
+    Result Read (MemAddr address, void* data, MemSize size, RegAddr* reg);
     Result Write(MemAddr address, void* data, MemSize size, LFID fid, TID tid);
-    bool   FamtoFlush(LFID fid);
-    
-    
-    bool   FlushWCBInFam   (LFID fid);
+    bool   WClienttoFlush(WClientID wid);
+    bool   FlushWCBInWClient(WClientID wid);
 
     size_t GetLineSize() const { return m_lineSize; }
 
     // Memory callbacks
     bool OnMemoryReadCompleted(MemAddr addr, const char* data);
-    bool OnMemoryWriteCompleted(LFID tid);
+    bool OnMemoryWriteCompleted(TID tid);
     bool OnMemorySnooped(MemAddr addr, const char* data, const bool* mask);
     bool OnMemoryInvalidated(MemAddr addr);
-   
+
     Object& GetMemoryPeer() { return m_parent; }
 
 
@@ -161,7 +160,7 @@ public:
     size_t GetAssociativity() const { return m_assoc; }
     size_t GetNumLines()      const { return m_lines.size(); }
     size_t GetNumSets()       const { return m_sets; }
-    size_t GetWCBSize()       const { return m_wcbsize;}
+    size_t GetWCBSize()       const { return m_wcbsize; }
 
     const Line& GetLine(size_t i) const { return m_lines[i];  }
 };

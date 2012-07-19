@@ -68,14 +68,13 @@ bool COMA::Cache::Read(MCID id, MemAddr address)
         return false;
     }
     
-    
     return true;
 }
 
 // Called from the processor on a memory write (can be any size with write-through/around)
 // Just queues the request.
-bool COMA::Cache::Write(MCID id, MemAddr address, const MemData& data, LFID fid)
-    {
+bool COMA::Cache::Write(MCID id, MemAddr address, const MemData& data, WClientID wid)
+{
     assert(address % m_lineSize == 0);
 
     // We need to arbitrate between the different processes on the cache,
@@ -91,12 +90,12 @@ bool COMA::Cache::Write(MCID id, MemAddr address, const MemData& data, LFID fid)
     req.address = address;
     req.write   = true;
     req.client  = id;
-    req.fid     = fid;
+    req.wid     = wid;
     COMMIT{
     std::copy(data.data, data.data + m_lineSize, req.data);
     std::copy(data.mask, data.mask + m_lineSize, req.mask);
     }
-    
+
     // Client should have been registered
     assert(m_clients[req.client] != NULL);
     
@@ -119,7 +118,7 @@ bool COMA::Cache::Write(MCID id, MemAddr address, const MemData& data, LFID fid)
                 return false;
             }
         }
-    } 
+    }
     
     return true;
 }
@@ -255,7 +254,7 @@ bool COMA::Cache::EvictLine(Line* line, const Request& req)
         }
     }
     
-    COMMIT{ line->state = LINE_EMPTY;}
+    COMMIT{ line->state = LINE_EMPTY; }
     return true;
 }
 
@@ -293,8 +292,8 @@ bool COMA::Cache::OnMessageReceived(Message* msg)
     {
     case Message::REQUEST:
     case Message::REQUEST_DATA:
-        // Some cache had a read miss. See if we have the line.
-        
+        // Some cache had a read miss. See if we have the line.        
+
         if (line != NULL && line->state == LINE_FULL)
         {
             // We have a copy of the line
@@ -357,9 +356,9 @@ bool COMA::Cache::OnMessageReceived(Message* msg)
         COMMIT
         {
             // Some byte may have been overwritten by processor.
-                    // Update the message. This will ensure the response
-                    // gets the latest value, and other processors too
-                    // (which is fine, according to non-determinism).
+            // Update the message. This will ensure the response
+            // gets the latest value, and other processors too
+            // (which is fine, according to non-determinism).
             line::blit(msg->data.data, line->data, line->valid, m_lineSize);
 
             // Store the data, masked by the already-valid bitmask
@@ -481,7 +480,7 @@ bool COMA::Cache::OnMessageReceived(Message* msg)
             assert(line != NULL);
             assert(line->updating > 0);
             
-            if (!m_clients[msg->client]->OnMemoryWriteCompleted(msg->fid))
+            if (!m_clients[msg->client]->OnMemoryWriteCompleted(msg->wid))
             {
                 ++m_numStallingWCompletions;
                 return false;
@@ -521,7 +520,6 @@ bool COMA::Cache::OnMessageReceived(Message* msg)
                             ++m_numStallingWSnoops;
                             return false;
                         }
-                        
                     }
                 }
             }
@@ -560,7 +558,6 @@ bool COMA::Cache::OnReadCompleted(MemAddr addr, const char * data)
             DeadlockWrite("Unable to send read completion to clients");
             return false;
         }
-        
     }
     
     return true;
@@ -656,7 +653,7 @@ Result COMA::Cache::OnWriteRequest(const Request& req)
         // We have all tokens, notify the sender client immediately
         TraceWrite(req.address, "Processing Bus Write Request: Exclusive Hit");
         
-        if (!m_clients[req.client]->OnMemoryWriteCompleted(req.fid))
+        if (!m_clients[req.client]->OnMemoryWriteCompleted(req.wid))
         {
             ++m_numStallingWHits;
             DeadlockWrite("Unable to process bus write completion for client %u", (unsigned)req.client);
@@ -680,7 +677,7 @@ Result COMA::Cache::OnWriteRequest(const Request& req)
             msg->sender    = m_id;
             msg->ignore    = false;
             msg->client    = req.client;
-            msg->fid       = req.fid;
+            msg->wid       = req.wid;
             std::copy(req.data, req.data + m_lineSize, msg->data.data);
             std::copy(req.mask, req.mask + m_lineSize, msg->data.mask);
 

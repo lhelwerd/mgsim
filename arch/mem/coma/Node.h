@@ -14,17 +14,13 @@ namespace Simulator
  * For use in COMA::Object instances. Writes out a message
  * if the specified address is being traced.
  */
-#ifndef TRACE_COMA_ALL
 #define TraceWrite(addr, fmt, ...) do { \
-const COMA::TraceMap& traces = m_parent.GetTraces(); \
-MemAddr __addr = (addr) / m_lineSize * m_lineSize; \
-    if (!traces.empty() && traces.find((__addr)) != traces.end()) { \
-    OutputWrite(("0x%llx: " fmt), (unsigned long long)(__addr), ##__VA_ARGS__); \
-} \
-} while (false)
-#else
-#define TraceWrite(addr, fmt, ...) DebugMemWrite(("0x%llx: " fmt), (unsigned long long)(addr), ##__VA_ARGS__); 
-#endif
+        const COMA::TraceMap& traces = m_parent.GetTraces(); \
+        MemAddr __addr = (addr) / m_lineSize * m_lineSize; \
+        if (!traces.empty() && traces.find((__addr)) != traces.end()) { \
+            OutputWrite(("0x%llx: " fmt), (unsigned long long)(__addr), ##__VA_ARGS__); \
+        } \
+    } while (false)
 
 /**
  * This class defines a generic ring node interface.
@@ -57,7 +53,7 @@ protected:
             bool         dirty;         ///< Is the data dirty? (EV, RD, RDT)
             unsigned int tokens;        ///< Number of tokens in this message (RDT, EV)
             size_t       client;        ///< Sending client (UP)
-            LFID         fid;           ///< Sending family (UP)
+            WClientID    wid;           ///< Sending entity on client (family/thread) (UP)
         };
         
         /// For memory management

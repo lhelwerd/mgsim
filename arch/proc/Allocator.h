@@ -123,7 +123,7 @@ public:
     bool DecreaseFamilyDependency(LFID fid, FamilyDependency dep);
     bool IncreaseFamilyDependency(LFID fid, FamilyDependency dep);
     bool CheckFamilyDependency   (LFID fid, FamilyDependency dep);
-    bool BarrierFam(LFID fid)  const {return m_dcache.FamtoFlush(fid);}
+    bool BarrierFam(LFID fid)  const { return m_dcache.WClienttoFlush(fid); }
     bool DecreaseThreadDependency(TID tid, ThreadDependency dep);
     
     TID PopActiveThread();

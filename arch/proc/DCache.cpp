@@ -24,7 +24,7 @@ Processor::DCache::DCache(const std::string& name, Processor& parent, Clock& clo
     m_selector       (IBankSelector::makeSelector(*this, config.getValue<string>(*this, "BankSelector"), m_sets)),
     m_wcbselect      (IBankSelector::makeSelector(*this, config.getValue<string>(*this, "BankSelector"), m_wcbsize)),
     m_completed      ("b_completed", *this, clock, m_sets * m_assoc),
-    m_famflush       ("b_famflush",  *this, clock, m_wcbsize),
+    m_wcbtoflush     ("b_wcbtoflush", *this, clock, m_wcbsize),
     m_incoming       ("b_incoming",  *this, clock, config.getValue<BufferSize>(*this, "IncomingBufferSize")),
     m_outgoing       ("b_outgoing",  *this, clock, config.getValue<BufferSize>(*this, "OutgoingBufferSize")),
     m_numRHits        (0),
@@ -36,17 +36,18 @@ Processor::DCache::DCache(const std::string& name, Processor& parent, Clock& clo
     m_numResolvedConflicts(0),
     m_numWAccesses    (0),
     m_numWHits        (0),
+    m_wcbConflicts   (0),
+    m_wcbFlushes      (0),
+    m_numPassThroughWMisses(0),
     m_numLoadingWMisses(0),
     m_numStallingRMisses(0),
     m_numStallingWMisses(0),
     m_numSnoops(0),
-    m_wcbConflicts   (0),
-    m_wcbFlushes      (0),
 
     p_CompletedReads(*this, "completed-reads", delegate::create<DCache, &Processor::DCache::DoCompletedReads   >(*this) ),
     p_Incoming      (*this, "incoming",        delegate::create<DCache, &Processor::DCache::DoIncomingResponses>(*this) ),
     p_Outgoing      (*this, "outgoing",        delegate::create<DCache, &Processor::DCache::DoOutgoingRequests >(*this) ),
-    p_FamFlush      (*this, "FlushWCBInFam",   delegate::create<DCache, &Processor::DCache::DoFamFlush         >(*this) ),
+    p_WCBFlush      (*this, "flush-wcb",       delegate::create<DCache, &Processor::DCache::DoWCBFlush         >(*this) ),
 
     p_service        (*this, clock, "p_service")
 {
@@ -58,10 +59,12 @@ Processor::DCache::DCache(const std::string& name, Processor& parent, Clock& clo
     RegisterSampleVariableInObject(m_numResolvedConflicts, SVC_CUMULATIVE);
     RegisterSampleVariableInObject(m_numWHits, SVC_CUMULATIVE);
     RegisterSampleVariableInObject(m_numLoadingWMisses, SVC_CUMULATIVE);
-    RegisterSampleVariableInObject(m_numStallingRMisses, SVC_CUMULATIVE);
-    RegisterSampleVariableInObject(m_numStallingWMisses, SVC_CUMULATIVE);
     RegisterSampleVariableInObject(m_wcbConflicts, SVC_CUMULATIVE);
     RegisterSampleVariableInObject(m_wcbFlushes, SVC_CUMULATIVE);
+    RegisterSampleVariableInObject(m_numPassThroughWMisses, SVC_CUMULATIVE);
+    RegisterSampleVariableInObject(m_numStallingRMisses, SVC_CUMULATIVE);
+    RegisterSampleVariableInObject(m_numStallingWMisses, SVC_CUMULATIVE);
+    RegisterSampleVariableInObject(m_numSnoops, SVC_CUMULATIVE);
     
     StorageTraceSet traces;
     m_mcid = m_memory.RegisterClient(*this, p_Outgoing, traces, m_incoming, true);
@@ -70,7 +73,7 @@ Processor::DCache::DCache(const std::string& name, Processor& parent, Clock& clo
     m_completed.Sensitive (p_CompletedReads);
     m_incoming. Sensitive (p_Incoming);
     m_outgoing. Sensitive (p_Outgoing);
-    m_famflush. Sensitive (p_FamFlush);
+    m_wcbtoflush.Sensitive (p_WCBFlush);
     
     // These things must be powers of two
     if (m_assoc == 0 || !IsPowerOfTwo(m_assoc))
@@ -82,7 +85,7 @@ Processor::DCache::DCache(const std::string& name, Processor& parent, Clock& clo
     {
         throw exceptf<InvalidArgumentException>(*this, "DCacheNumSets = %zd is not a power of two", (size_t)m_sets);
     }
-    
+
     if (m_wcbsize == 0 || !IsPowerOfTwo(m_wcbsize))
     {
         throw exceptf<InvalidArgumentException>(*this, "WCBSize = %zd is not a power of two", (size_t)m_wcbsize);
@@ -115,10 +118,8 @@ Processor::DCache::DCache(const std::string& name, Processor& parent, Clock& clo
         m_wcblines[i].data   = new char[m_lineSize];
         m_wcblines[i].valid  = new bool[m_lineSize];
         std::fill(m_wcblines[i].valid, m_wcblines[i].valid + m_lineSize, false);
-       
-        
     }
-    
+
     m_wbstate.size   = 0;
     m_wbstate.offset = 0;
 }
@@ -130,14 +131,13 @@ Processor::DCache::~DCache()
         delete[] m_lines[i].data;
         delete[] m_lines[i].valid;
     }
-    
+
     for (size_t i = 0; i < m_wcblines.size(); ++i)
     {
         delete[] m_wcblines[i].data;
         delete[] m_wcblines[i].valid;
-        
     }
-    
+
     delete m_selector;
     delete m_wcbselect;
 }
@@ -151,154 +151,156 @@ static std::string valid2str(bool* valid, size_t ms)
 }
 
 
-void Processor::DCache::ReadWCB(MemAddr address, Line* line)  
+void Processor::DCache::ReadWCB(MemAddr address, Line* line)
 {
     MemAddr tag;
     size_t index, i, offset = address % m_lineSize;
     m_wcbselect->Map((address - offset) / m_lineSize, tag, index);
-    
+
     WCB_Line& wcb_line = m_wcblines[index];
-    
-    if(!wcb_line.free && (wcb_line.tag == tag))
+
+    if (!wcb_line.free && (wcb_line.tag == tag))
     {
-       
+
         for (i = 0; i < m_lineSize; ++i)
        {
-           if(wcb_line.valid[i])
+           if (wcb_line.valid[i])
            {
                COMMIT{
                    line->data[i] = wcb_line.data[i];
                    line->valid[i]= true;
                }
            }
-       } 
-      
+       }
+
        DebugMemWrite("Cache line update from WCB:%#16llx, index %u, valid %s", (unsigned long long)(address - offset), (unsigned)index, valid2str(wcb_line.valid, m_lineSize).c_str());
     }
-    
-    return;    
+
+    return;
 }
 
-bool Processor::DCache::WriteWCB(MemAddr address, MemSize size, void* data, LFID fid)
+bool Processor::DCache::WriteWCB(MemAddr address, MemSize size, void* data, LFID fid, TID tid)
 {
     MemAddr tag;
     size_t index;
     size_t offset = (size_t)(address % m_lineSize);
     m_wcbselect->Map((address - offset) / m_lineSize, tag, index);
-    
+
     WCB_Line& wcb_line = m_wcblines[index];
-      
-    if(!wcb_line.free && ((wcb_line.fid != fid) || (wcb_line.tag != tag)))
+
+    WClientID wid = fid; // family client, using family-based barriers
+
+    if (!wcb_line.free && ((wcb_line.wid != wid) || (wcb_line.tag != tag)))
     {
         // flush before combine write data
-        if(!FlushWCBLine(index))
+        if (!FlushWCBLine(index))
         {
             DeadlockWrite("Unable to flush line %u in WCB", (unsigned)index);
             return false;
         }
+
         COMMIT{ ++m_wcbConflicts;}
-                     
     }
     else
         COMMIT{ ++m_numWHits; }
-        
+
     COMMIT {
-        memcpy(wcb_line.data + offset, data, (size_t)size);
+        std::copy((char*)data, (char*)data + size, wcb_line.data + offset);
         std::fill(wcb_line.valid + offset, wcb_line.valid + offset + size, true);
         wcb_line.tag  = tag;
-        wcb_line.fid  = fid;
+        wcb_line.wid  = wid;
         wcb_line.free = false;
-        
     }
-    DebugMemWrite("F%u write to WCB line %#16llx, index %u, free %d, size %u, valid %s", (unsigned)wcb_line.fid, (unsigned long long)address, 
+
+    DebugMemWrite("W%u write to WCB line %#16llx, index %u, free %d, size %u, valid %s", (unsigned)wcb_line.wid, (unsigned long long)address,
                   (unsigned)index, (int)wcb_line.free, (unsigned)size, valid2str(wcb_line.valid, m_lineSize).c_str());
-   
+
     return true;
 }
 
-Result Processor::DCache::DoFamFlush()
+Result Processor::DCache::DoWCBFlush()
 {
-    assert(!m_famflush.Empty());
-    LFID   fid     = m_famflush.Front();
+    assert(!m_wcbtoflush.Empty());
+
+    WClientID wid = m_wcbtoflush.Front();
+
     for (vector<WCB_Line>::const_iterator p = m_wcblines.begin(); p != m_wcblines.end(); ++p)
     {
-        if(!p->free && p->fid == fid )
+        if (!p->free && p->wid == wid )
         {
-           
-            if(!FlushWCBLine( p - m_wcblines.begin()))
-            {   
+
+            if (!FlushWCBLine( p - m_wcblines.begin()))
+            {
               return FAILED;
             }
             return SUCCESS;
         }
     }
 
-    m_famflush.Pop();
+    m_wcbtoflush.Pop();
     return SUCCESS;
 }
 
 
 bool Processor::DCache::FlushWCBLine(size_t index)
 {
-    
-    
-    WCB_Line& wcb_line = m_wcblines[index];    
-    assert(!wcb_line.free);
+
+
+    WCB_Line& wcb_line = m_wcblines[index];
+
     //put this line into outgoing buffer
     Request request;
     request.write     = true;
     request.address   = m_wcbselect->Unmap(wcb_line.tag,index) * m_lineSize;
-    memcpy(request.data.data, wcb_line.data,(size_t)m_lineSize);
-    memcpy(request.mask, wcb_line.valid,(size_t)m_lineSize);
-    request.fid       =  wcb_line.fid;
-        
+    COMMIT{
+    memcpy(request.data.data, wcb_line.data, m_lineSize);
+    memcpy(request.data.mask, wcb_line.valid, m_lineSize);
+    }
+    request.wid       =  wcb_line.wid;
+
     if (!m_outgoing.Push(request))
     {
-        ++m_numStallingWMisses;
         DeadlockWrite("Unable to push request from wcb line flush to outgoing buffer");
         return false;
-    } 
-    
-    DebugMemWrite("F%u flush WCB line %#16llx, index %u, free %d, size %u, valid %s", (unsigned)wcb_line.fid, (unsigned long long)request.address, 
-                  (unsigned)index, (int)wcb_line.free, (unsigned)m_lineSize, valid2str(wcb_line.valid, m_lineSize).c_str());
-    
-    if (!m_allocator.IncreaseFamilyDependency(wcb_line.fid,FAMDEP_OUTSTANDING_WRITES))
+    }
+    if (!m_allocator.IncreaseFamilyDependency((LFID)wcb_line.wid, FAMDEP_OUTSTANDING_WRITES))
     {
         return false;
     }
-    
-    COMMIT {           
+
+    COMMIT {
         std::fill(wcb_line.valid, wcb_line.valid + m_lineSize, false);
         wcb_line.free = true;
         ++m_wcbFlushes;
     }
-    
-  
-    return true;  
+
+    DebugMemWrite("W%u flush WCB line %#16llx, index %u, free %d, size %u, valid %s", (unsigned)wcb_line.wid, (unsigned long long)request.address,
+                  (unsigned)index, (int)wcb_line.free, (unsigned)m_lineSize, valid2str(wcb_line.valid, m_lineSize).c_str());
+
+    return true;
 }
 
-bool Processor::DCache::FamtoFlush(LFID fid)
+bool Processor::DCache::WClienttoFlush(WClientID wid)
 {
     for (vector<WCB_Line>::const_iterator p = m_wcblines.begin(); p != m_wcblines.end(); ++p)
     {
-       if(!p->free && p->fid == fid )
+       if (!p->free && p->wid == wid)
         {
             return true;
         }
     }
-    
+
     return false;
 }
 
-bool Processor::DCache::FlushWCBInFam(LFID fid)
+bool Processor::DCache::FlushWCBInWClient(WClientID wid)
 {
-   
-   assert(fid != INVALID_LFID);
-   if(!m_famflush.Push(fid))
+   assert(wid != INVALID_WCLIENTID);
+
+   if (!m_wcbtoflush.Push(wid))
    {
-       
-       DeadlockWrite("Unable to push F%u into flush buffer ", (unsigned)fid);
-       return false;    
+       DeadlockWrite("Unable to push W%u into flush buffer ", (unsigned)wid);
+       return false;
    }
    return true;
 }
@@ -396,9 +398,8 @@ Result Processor::DCache::Read(MemAddr address, void* data, MemSize size, RegAdd
 
         return FAILED;
     }
-    
+
     Line*  line;
-    
     Result result;
     // SUCCESS - A line with the address was found
     // DELAYED - The line with the address was not found, but a line has been allocated
@@ -413,14 +414,14 @@ Result Processor::DCache::Read(MemAddr address, void* data, MemSize size, RegAdd
     
     // Update last line access
     COMMIT{ line->access = GetCycleNo(); }
-    
-   //Update data from WCB
+
+    //Update data from WCB
     ReadWCB(address, line);
-    
+
     // Check if the data that we want is valid in the line.
     // This happens when the line is FULL, or LOADING and has been
     // snooped to (written to from another core) in the mean time.
-    
+
     size_t i;
     for (i = 0; i < size; ++i)
     {
@@ -429,27 +430,27 @@ Result Processor::DCache::Read(MemAddr address, void* data, MemSize size, RegAdd
             break;
         }
     }
-    
+
     COMMIT
     {
         if (i == size)
         {
             // Data is entirely in the cache, copy it
             memcpy(data, line->data + offset, (size_t)size);
-            
-            if(line->state != LINE_LOADING)
+
+            if (line->state != LINE_LOADING)
                 line->state =  LINE_FULL;
-           
+
             ++m_numRHits;
-            
-            return SUCCESS;            
-        }    
-        
+
+            return SUCCESS;
+        }
+
     }
-    
-    if(line->state != LINE_LOADING)
+
+    if (line->state != LINE_LOADING)
     {
-        if(line->state == LINE_INVALID)  //hit an invalid line
+        if (line->state == LINE_INVALID)  //hit an invalid line
         {
             ++m_numInvalidRMisses;
             return FAILED;
@@ -464,15 +465,13 @@ Result Processor::DCache::Read(MemAddr address, void* data, MemSize size, RegAdd
             DeadlockWrite("Unable to push request to outgoing buffer");
             return FAILED;
         }
-    
+
         // statistics
-        COMMIT
-        { 
+        COMMIT { 
             if (line->state == LINE_EMPTY)
                 ++m_numEmptyRMisses;
             else
                 ++m_numResolvedConflicts; 
-                
         }
     }
     else 
@@ -480,7 +479,7 @@ Result Processor::DCache::Read(MemAddr address, void* data, MemSize size, RegAdd
         // Data is loading from memory
         COMMIT{ ++m_numLoadingRMisses; }
     }
-        
+
     // Data is being loaded, add request to the queue
     COMMIT
     {
@@ -567,15 +566,20 @@ Result Processor::DCache::Write(MemAddr address, void* data, MemSize size, LFID 
             COMMIT{ 
                 std::copy((char*)data, (char*)data + size, line->data + offset);
                 std::fill(line->valid + offset, line->valid + offset + size, true);
+            }
 
-                // Statistics
-                ++m_numWHits;
-               }
-           DebugMemWrite("Cache line update from write hit: %#16llx, F%u/T%u", (unsigned long long)address, (unsigned)fid,(unsigned)tid);
+           DebugMemWrite("Cache line update from write hit: %#016llx, F%u/T%u", (unsigned long long)address, (unsigned)fid, (unsigned)tid);
+
         }
     }
-    if(!WriteWCB(address, size, data, fid))
+    else 
     {
+        COMMIT{ ++m_numPassThroughWMisses; }
+    }
+    
+    if (!WriteWCB(address, size, data, fid, tid))
+    {
+        ++m_numStallingWMisses;
         DeadlockWrite("Unable to merge write into WCB");
         return FAILED;
     }
@@ -583,7 +587,6 @@ Result Processor::DCache::Write(MemAddr address, void* data, MemSize size, LFID 
     COMMIT{ ++m_numWAccesses; }
 
     return DELAYED;
-
 }
 
 bool Processor::DCache::OnMemoryReadCompleted(MemAddr addr, const char* data)
@@ -616,14 +619,12 @@ bool Processor::DCache::OnMemoryReadCompleted(MemAddr addr, const char* data)
                 {
                     // This is a write to the same line, merge it
                     line::blit(&mdata[0], p->data.data, p->data.mask, m_lineSize);
-                }                    
-                DebugMemWrite("Merge outgoing buffer data with load response from 0x%016llx ", (unsigned long long)addr);
-                
+
+                    DebugMemWrite("Merge outgoing buffer data with load response from 0x%016llx ", (unsigned long long)addr);
+                }
             }
-          
-            
             DebugMemWrite("Finished checking data consistency for load response from 0x%016llx ", (unsigned long long)addr);
-            
+
             // Copy the data into the cache line.
             // Mask by valid bytes (don't overwrite already written data).
             line::blitnot(line->data, mdata, line->valid, m_lineSize);
@@ -631,8 +632,7 @@ bool Processor::DCache::OnMemoryReadCompleted(MemAddr addr, const char* data)
             
             line->processing = true;
         }
-    
-              
+
         // Push the cache-line to the back of the queue
         Response response;
         response.write = false;
@@ -646,14 +646,14 @@ bool Processor::DCache::OnMemoryReadCompleted(MemAddr addr, const char* data)
     return true;
 }
 
-bool Processor::DCache::OnMemoryWriteCompleted(LFID fid)
+bool Processor::DCache::OnMemoryWriteCompleted(WClientID wid)
 {
     // Data has been written
-    if (fid != INVALID_LFID) // otherwise for DCA
+    if (wid != INVALID_WCLIENTID) // otherwise for DCA
     {
         Response response;
         response.write = true;
-        response.fid  =  fid;
+        response.wid  =  wid;
         if (!m_incoming.Push(response))
         {
             DeadlockWrite("Unable to push write completion to buffer");
@@ -684,6 +684,9 @@ bool Processor::DCache::OnMemorySnooped(MemAddr address, const char* data, const
     // Cache coherency: check if we have the same address
     if (FindLine(address, line, true) == SUCCESS)
     {
+
+        DebugMemWrite("Cache line update from snoop: 0x%016llx ", (unsigned long long)address);
+
         COMMIT
         {
             // We do, update the data and mark written bytes as valid
@@ -695,43 +698,40 @@ bool Processor::DCache::OnMemorySnooped(MemAddr address, const char* data, const
 
             // Statistics
             ++m_numSnoops;
-            
-            DebugMemWrite("Cache line update from snoop: 0x%016llx ", (unsigned long long)address);
         }
     }
-        
-        //Update WCB with dropping valid bytes if matched
-    
+
+    //Update WCB with dropping valid bytes if matched
     MemAddr tag;
-    size_t index;
+    size_t index,count = 0;
     m_wcbselect->Map(address / m_lineSize, tag, index);
-    
-    WCB_Line& wcb_line = m_wcblines[index]; 
+
+    WCB_Line& wcb_line = m_wcblines[index];
     if (!wcb_line.free && wcb_line.tag == tag)
     {
         COMMIT{
+            for (size_t i = 0; i < m_lineSize; ++i)
+            {
+                if (wcb_line.valid[i] && mask[i])
+                {
+                    wcb_line.valid[i] = false;
+                    count++;
+                }
+            }
 
-            line::setif(wcb_line.valid, false, mask, m_lineSize);
-            
-            // FIXME: this is an optimization, check
-            // for rewriting outside of COMMIT block?
-            size_t i;
-            for (i = 0; i < m_lineSize; ++i)
-                if (wcb_line.valid[i])
-                    break;
-            
-            if(i == m_lineSize)
+            if (count == m_lineSize)
                 wcb_line.free = true;
+
         }
-        
+
         DebugMemWrite("WCB snooping from address 0x%016llx ", (unsigned long long)address);
 
     }
-    
+
     // Statistics
     COMMIT{ ++m_numSnoops;}
-        
-    
+
+
     return true;
 }
 
@@ -904,13 +904,13 @@ Result Processor::DCache::DoIncomingResponses()
     const Response& response = m_incoming.Front();
     if (response.write)
     {
-        if (!m_allocator.DecreaseFamilyDependency(response.fid,FAMDEP_OUTSTANDING_WRITES))
+        if (!m_allocator.DecreaseFamilyDependency((LFID)response.wid, FAMDEP_OUTSTANDING_WRITES))
         {
-            DeadlockWrite("Unable to decrease outstanding writes of F%u", (unsigned)response.fid);
+            DeadlockWrite("Unable to decrease outstanding writes on W%u", (unsigned)response.wid);
             return FAILED;
         }
 
-        DebugMemWrite("F%u completed pending stores", (unsigned)response.fid);
+        DebugMemWrite("W%u completed store", (unsigned)response.wid);
 
     }
     else
@@ -930,11 +930,9 @@ Result Processor::DCache::DoOutgoingRequests()
     assert(!m_outgoing.Empty());
     const Request& request = m_outgoing.Front();
 
-    assert(request.address % m_lineSize == 0);
-    
     if (request.write)
     {
-        if (!m_memory.Write(m_mcid, request.address, request.data, request.fid))
+        if (!m_memory.Write(m_mcid, request.address, request.data, request.wid))
         {
             DeadlockWrite("Unable to send write to 0x%016llx to memory", (unsigned long long)request.address);
             return FAILED;
@@ -950,7 +948,7 @@ Result Processor::DCache::DoOutgoingRequests()
     }
 
     DebugMemWrite("F%d queued outgoing %s request for %.*llx",
-                  (request.write ? (int)request.fid : -1), (request.write ? "store" : "load"),
+                  (request.write ? (int)request.wid : -1), (request.write ? "store" : "load"),
                   (int)(sizeof(MemAddr)*2), (unsigned long long)request.address);
 
     m_outgoing.Pop();
@@ -968,7 +966,7 @@ void Processor::DCache::Cmd_Info(std::ostream& out, const std::vector<std::strin
     "  Display global information such as hit-rate and configuration.\n"
     "- inspect <component> buffers\n" 
     "  Reads and display the outgoing request buffer.\n"
-    "- inspect <component> wcb\n" 
+    "- inspect <component> wcb\n"
     "  Reads and display used lines in Write Combine Buffer.\n"
     "- inspect <component> lines\n"
     "  Reads and displays the cache-lines.\n";
@@ -995,6 +993,7 @@ void Processor::DCache::Cmd_Read(std::ostream& out, const std::vector<std::strin
         uint64_t numRAccesses = m_numRHits + m_numDelayedReads;
 
         uint64_t numRRqst = m_numEmptyRMisses + m_numResolvedConflicts;
+
         uint64_t numWRqst = m_wcbFlushes;
         uint64_t numRqst  = numRRqst + numWRqst;
 
@@ -1042,7 +1041,7 @@ void Processor::DCache::Cmd_Read(std::ostream& out, const std::vector<std::strin
                 << "Number of write requests from client:                           " << m_numWAccesses << endl
                 << "Breakdown of writes:" << endl
                 << "- to a loaded line with same tag:                               " << PRINTVAL(m_numWHits, w_factor) << endl
-                << "- to a wcb line with different tag:                             " << PRINTVAL( m_wcbConflicts, w_factor) << endl
+                << "- to a wcb line with different tag:                             " << PRINTVAL(m_wcbConflicts, w_factor) << endl
                 << "(percentages relative to " << m_numWAccesses << " write requests)" << endl
                 << endl;
             
@@ -1099,21 +1098,18 @@ void Processor::DCache::Cmd_Read(std::ostream& out, const std::vector<std::strin
                 {
                     for (size_t x = y; x < y + BYTES_PER_LINE; ++x)
                     {
-                        out << " ";
-                        if (p->mask[x]) {
-                            out<< setw(2) << (unsigned)(unsigned char)p->data.data[x];
-                        }
-                        else {
-                            out << "--";
-                        }
-                    }             
-                    
+                        if (p->data.mask[x])
+                            out << " " << setw(2) << (unsigned)(unsigned char)p->data.data[x];
+                        else
+                            out << " --";
+                    }
+
                     if (y + BYTES_PER_LINE < m_lineSize) {
                         // This was not yet the last line
                         out << endl << "                   |       |";
                     }
                 }
-                out << endl << "-------------------+------+-------+------------------------------------------------" << endl;
+                out << endl << "-------------------+-------+--------------------------------------" << endl;
             }
             out << dec << endl;
         }
@@ -1122,17 +1118,17 @@ void Processor::DCache::Cmd_Read(std::ostream& out, const std::vector<std::strin
     else if (arguments[0] == "wcb")
     {
         out << endl << "Write Combine Buffer line in use:" << endl << endl
-        << "Free | Set |       Address      |  FID  |                       Data                     " << endl
-        << "-----+-----+--------------------+-------+------------------------------------------------" << endl;
+        << "F | Set |       Address      |  WID  |                       Data                     " << endl
+        << "--+-----+--------------------+-------+------------------------------------------------" << endl;
         for (size_t j = 0; j < m_wcblines.size(); ++j)
         {
             const WCB_Line& wcb_line = m_wcblines[j];
-            if (!wcb_line.free)
+            if (1) // !wcb_line.free)
             {
-                out <<setw(4) << setfill(' ')<< (wcb_line.free?"T":"F") << " | " 
-                << setw(3) << setfill(' ')<< dec << right << j <<" | " 
-                << hex << "0x" << setw(16) << setfill('0') << m_wcbselect->Unmap(wcb_line.tag, j) * m_lineSize << " | "
-                << dec << setw(5) << right << setfill(' ') << wcb_line.fid << " |";
+                out << (int)wcb_line.free << " | "
+                << setw(3) << setfill(' ')<< dec << right << j <<" | "
+                << hex << "0x" << setw(16) << setfill('0') << m_selector->Unmap(wcb_line.tag, j) * m_lineSize << " | "
+                << dec << setw(5) << right << setfill(' ') << wcb_line.wid << " |";
                 out << hex << setfill('0');
                 static const int BYTES_PER_LINE = 16;
                 for (size_t y = 0; y < m_lineSize; y += BYTES_PER_LINE)
@@ -1142,18 +1138,18 @@ void Processor::DCache::Cmd_Read(std::ostream& out, const std::vector<std::strin
                         if (wcb_line.valid[x]) {
                             out << setw(2) << (unsigned)(unsigned char)wcb_line.data[x];
                         } else {
-                           out << "--";
+                            out << "  ";
                         }
-                    }             
-                                    
+                    }
+
                     if (y + BYTES_PER_LINE < m_lineSize) {
                         // This was not yet the last line
-                        out << endl << "     |     |                    |       |";
+                        out << endl << "  |    |                    |       |";
                     }
                 }
-                out << endl << "-----+-----+--------------------+-------+------------------------------------------------" << endl;
+                out << endl << "--+----+--------------------+-------+------------------------------------------------+--" << endl;
             }
-            
+
         }
         return;
     }
