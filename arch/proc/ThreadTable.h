@@ -40,19 +40,11 @@ struct Thread
          a dependency on the previous thread's cleanup event.
         */
         bool prevCleanedUp;
-        
-        /*
-         All writes made by a thread are tagged with the thread's TID. Thus,
-         the thread cannot be cleaned up until those writes have been
-         confirmed by the memory system.
-        */
-        //unsigned int numPendingWrites;
-    };
+            };
     
     MemAddr      pc;
     RegInfo      regs[NUM_REG_TYPES];
     Dependencies dependencies;
-   // bool         waitingForWrites;
     TID          nextInBlock;
     CID          cid;
     LFID         family;

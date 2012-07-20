@@ -757,6 +757,8 @@ FCapability Processor::Allocator::InitializeFamily(LFID fid) const
         // Dependencies
         family.dependencies.allocationDone      = false;
         family.dependencies.numPendingReads     = 0;
+        family.dependencies.numPendingWrites    = 0;
+        family.dependencies.hasBarrier          = false;
         family.dependencies.numThreadsAllocated = 0;
         family.dependencies.detached            = false;
         family.dependencies.syncSent            = true;
