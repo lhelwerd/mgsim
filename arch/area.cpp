@@ -214,6 +214,17 @@ static const structure_desc family_table = {
                                                     // R: network's link handler (break, detach, done)
                                                     // RW: DCache's read handler (decrement)
                                                     // R: Network's sync handler (dependency check)
+
+    FIELD(unsigned, numPendingWrites, 3, 0, 3),     // RW: family allocation process (setup initial; check dependencies)
+                                                    // R: Execute stage (memory write barrier)
+                                                    // R: Writeback stage (memory write barrier)
+                                                    // RW: DCache write completion process (decrement)
+                                                    // RW: memory stage (increment)
+                                                    // R: writeback stage (check dependencies)
+
+    FIELD(bool, hasBarrier, 0, 2, 1),               // W: family allocation process (setup initial)
+                                                    // RW: DCache write completion process (check for memory barrier; wakeup)
+                                                    // W: writeback stage (suspend) 
                                                                                   
     FIELD(LFID, link, 4, 1, 3),                     // W: local family allocation process (set to prev FID)
                                                     // RW: network's link handler (create forward, with possible restrict)
@@ -298,17 +309,6 @@ static const structure_desc thread_table = {
     FIELD(bool, prev_cleaned_up, 2, 1, 0),          // W: thread allocation process (setup initial; mark cleanup)
                                                     // R: DCache write completion process (check dependencies)
                                                     // R: writeback stage (check dependencies)
-                                                    
-    FIELD(unsigned, pending_writes, 3, 0, 3),       // RW: thread allocation process (setup initial; check dependencies)
-                                                    // R: Execute stage (memory write barrier)
-                                                    // R: Writeback stage (memory write barrier)
-                                                    // RW: DCache write completion process (decrement)
-                                                    // RW: memory stage (increment)
-                                                    // R: writeback stage (check dependencies)
-                                                    
-    FIELD(bool, waiting_writes, 0, 2, 1),           // W: thread allocation process (setup initial)
-                                                    // RW: DCache write completion process (check for memory barrier; wakeup)
-                                                    // W: writeback stage (suspend) 
                                                     
     FIELD(TID, block_next, 0, 0, 1),                // RW: thread allocation process (setup initial; mark cleanup)
 

@@ -55,15 +55,14 @@ struct Family
         TSize numThreadsAllocated;
         
         /*
-         FIXME:
-         Maybe this can be generalized to a thread not being cleaned up
-         before all pending operations made by it have completed. Then
-         this dependency becomes implicit in the numThreadsAllocated
-         dependency.
+          All memory loads and stores issued by the family must have completed.
         */
         unsigned int numPendingReads;
         unsigned int numPendingWrites;
-        bool         hasBarrier;          // Memory barrier issued.
+        /*
+          One thread in the family has issued a memory barrier.
+        */
+        bool         hasBarrier;
 	};
 
     PSize        placeSize;      // Number of cores this family wanted to run on.
