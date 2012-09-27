@@ -197,7 +197,7 @@ class Network : public Object, public Inspect::Interface<Inspect::Read>
      A specialization of the generic register to implement arbitration
     */
     template <typename T, typename Arbitrator=PriorityArbitratedPort>
-    class Register : public Simulator::Register<T>
+    class Buffer : public Simulator::Buffer<T>
     {
         ArbitratedService<Arbitrator> m_service;
 
@@ -206,19 +206,19 @@ class Network : public Object, public Inspect::Interface<Inspect::Read>
             m_service.AddProcess(process);
         }
         
-        bool Write(const T& data)
+        bool Push(const T& data, size_t min_space)
         {
             if (!this->Empty() || !m_service.Invoke()) {
                 return false;
             }
-            Simulator::Register<T>::Write(data);
+            Simulator::Buffer<T>::Push(data, min_space);
             return true;
         }
 
-        Register(Object& object, const std::string& name)
+        Buffer(Object& object, const std::string& name)
             : Object(name, object, object.GetClock()),
               Storage(name, object, object.GetClock()), 
-              Simulator::Register<T>(name + ".reg", object, object.GetClock()), 
+              Simulator::Buffer<T>(name + ".buf", object, object.GetClock(), 2), 
               m_service(object, object.GetClock(), name + ".p_service")
         {
         }
@@ -234,42 +234,42 @@ class Network : public Object, public Inspect::Interface<Inspect::Read>
      register.
     */
 	template <typename T>
-	class RegisterPair : public Object
+	class BufferPair : public Object
 	{
 	private:
-	    Register<T>* remote;     ///< Remote register to send output to
+	    Buffer<T>*   remote;     ///< Remote buffer to send output to
 	    Process      p_Transfer; ///< The transfer process
 	    
 	public:
-	    Register<T>  out;        ///< Register for outgoing messages
-	    Register<T>  in;         ///< Register for incoming messages
+	    Buffer<T>  out;        ///< Buffer for outgoing messages
+	    Buffer<T>  in;         ///< Buffer for incoming messages
 	    
 	    /// Transfers the output data to the input buffer
 	    Result DoTransfer()
 	    {
 	        assert(!out.Empty());
 	        assert(remote != NULL);
-	        if (!remote->Write(out.Read()))
+	        if (!remote->Push(out.Front(), 1))
 	        {
 	            return FAILED;
 	        }
-	        out.Clear();
+	        out.Pop();
 	        return SUCCESS;
 	    }
 	    
 	    /// Connects the output to the input on the destination core
-	    void Initialize(RegisterPair<T>& dest)
+	    void Initialize(BufferPair<T>& dest)
 	    {
 	        assert(remote == NULL);
 	        remote = &dest.in;
 	        dest.in.AddProcess(p_Transfer);
-            p_Transfer.SetStorageTraces(dest.in);
+                p_Transfer.SetStorageTraces(dest.in);
 	    }
 
-        RegisterPair(Object& parent, const std::string& name)
+        BufferPair(Object& parent, const std::string& name)
             : Object(name, parent),
               remote(NULL),
-              p_Transfer(*this, "transfer", delegate::create<RegisterPair, &RegisterPair::DoTransfer>(*this)),
+              p_Transfer(*this, "transfer", delegate::create<BufferPair, &BufferPair::DoTransfer>(*this)),
               out(parent, name + ".out"),
               in (parent, name + ".in")
         {
@@ -289,8 +289,8 @@ public:
     Network(const std::string& name, Processor& parent, Clock& clock, const std::vector<Processor*>& grid, Allocator& allocator, RegisterFile& regFile, FamilyTable& familyTable, Config& config);
     void Initialize(Network* prev, Network* next);
 
-    bool SendMessage(const RemoteMessage& msg);
-    bool SendMessage(const LinkMessage& msg);
+    bool SendMessage(const RemoteMessage& msg, size_t min_space);
+    bool SendMessage(const LinkMessage& msg, size_t min_space);
     bool SendAllocResponse(const AllocResponse& msg);
     bool SendSync(const SyncInfo& event);
 
@@ -306,9 +306,9 @@ private:
     
     bool ReadRegister(LFID fid, RemoteRegType kind, const RegAddr& addr, RegValue& value);
     bool WriteRegister(LFID fid, RemoteRegType kind, const RegAddr& raddr, const RegValue& value);
-    bool OnDetach(LFID fid);
-    bool OnBreak(LFID fid);
-    bool OnSync(LFID fid, PID completion_pid, RegIndex completion_reg);
+    bool OnDetach(LFID fid, size_t min_space);
+    bool OnBreak(LFID fid, size_t min_space);
+    bool OnSync(LFID fid, PID completion_pid, RegIndex completion_reg, size_t min_space);
     
     // Processes
     Result DoLink();
@@ -333,15 +333,15 @@ private:
 
 public:
     // Delegation network
-    Register<DelegateMessage>   m_delegateOut;    ///< Outgoing delegation messages
-    Register<DelegateMessage, CyclicArbitratedPort>   m_delegateIn;     ///< Incoming delegation messages
-    RegisterPair<LinkMessage>   m_link;           ///< Forward link through the cores
-    RegisterPair<AllocResponse> m_allocResponse;  ///< Backward link for allocation unroll/commit
+    Buffer<DelegateMessage>   m_delegateOut;    ///< Outgoing delegation messages
+    Buffer<DelegateMessage, CyclicArbitratedPort>   m_delegateIn;     ///< Incoming delegation messages
+    BufferPair<LinkMessage>   m_link;           ///< Forward link through the cores
+    BufferPair<AllocResponse> m_allocResponse;  ///< Backward link for allocation unroll/commit
     
     // Synchronizations destined for outgoing delegation network.
     // We need this buffer to break the circular depedency between the
     // link and delegation network.
-    Buffer<SyncInfo> m_syncs;
+    Simulator::Buffer<SyncInfo> m_syncs;
 
     // Processes
     Process p_DelegationOut;

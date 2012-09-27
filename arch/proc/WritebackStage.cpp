@@ -3,6 +3,8 @@
 
 namespace Simulator
 {
+static const size_t MINSPACE_INSERTION = 2;
+static const size_t MINSPACE_FORWARD   = 1;
 
 Processor::Pipeline::PipeAction Processor::Pipeline::WritebackStage::OnCycle()
 {
@@ -25,7 +27,7 @@ Processor::Pipeline::PipeAction Processor::Pipeline::WritebackStage::OnCycle()
     if (m_input.Rrc.type != RemoteMessage::MSG_NONE)
     {
         // Network activity
-        if (!m_network.SendMessage(m_input.Rrc))
+        if (!m_network.SendMessage(m_input.Rrc, MINSPACE_INSERTION))
         {
             DeadlockWrite("Unable to send network message");
             return PIPE_STALL;

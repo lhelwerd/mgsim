@@ -10,6 +10,8 @@ using namespace std;
 
 namespace Simulator
 {
+static const size_t MINSPACE_INSERTION = 2;
+static const size_t MINSPACE_FORWARD   = 1;
 
 Processor::Network::Network(
     const std::string&        name,
@@ -37,13 +39,13 @@ Processor::Network::Network(
     m_numAllocates(0),
     m_numBundles(0),
     m_numCreates(0),
-
-#define CONSTRUCT_REGISTER(name) name(*this, #name)
-    CONSTRUCT_REGISTER(m_delegateOut),
-    CONSTRUCT_REGISTER(m_delegateIn),
-    CONSTRUCT_REGISTER(m_link),
-    CONSTRUCT_REGISTER(m_allocResponse),
-#undef CONTRUCT_REGISTER
+    
+#define CONSTRUCT_BUFFER(name) name(*this, #name)
+    CONSTRUCT_BUFFER(m_delegateOut),
+    CONSTRUCT_BUFFER(m_delegateIn),
+    CONSTRUCT_BUFFER(m_link),
+    CONSTRUCT_BUFFER(m_allocResponse),
+#undef CONTRUCT_BUFFER
     m_syncs ("b_syncs", *this, clock, familyTable.GetNumFamilies(), 3 ),
 
     p_DelegationOut(*this, "delegation-out", delegate::create<Network, &Processor::Network::DoDelegationOut>(*this)),
@@ -81,7 +83,7 @@ void Processor::Network::Initialize(Network* prev, Network* next)
 #undef INITIALIZE
 }
 
-bool Processor::Network::SendMessage(const RemoteMessage& msg)
+bool Processor::Network::SendMessage(const RemoteMessage& msg, size_t min_space)
 {
     assert(msg.type != RemoteMessage::MSG_NONE);
     
@@ -118,14 +120,14 @@ bool Processor::Network::SendMessage(const RemoteMessage& msg)
             register with the response.
             This is also necessary to avoid a circular dependency on the output buffer.
             */
-            m_delegateIn.Simulator::Register<DelegateMessage>::Write(dmsg);
+            m_delegateIn.Simulator::Buffer<DelegateMessage>::Push(dmsg);
 
             // Return here to avoid clearing the input buffer. We want to process this
             // response next cycle.
             return SUCCESS;
         }
 
-        if (!m_delegateIn.Write(dmsg))
+        if (!m_delegateIn.Push(dmsg, 1))
         {
             DeadlockWrite("Unable to buffer local network message to loopback %s", msg.str().c_str());
             return false;
@@ -134,7 +136,7 @@ bool Processor::Network::SendMessage(const RemoteMessage& msg)
     }
     else
     {
-        if (!m_delegateOut.Write(dmsg))
+        if (!m_delegateOut.Push(dmsg, min_space))
         {
             DeadlockWrite("Unable to buffer remote network message for CPU%u %s", (unsigned)dmsg.dest, msg.str().c_str());
             return false;
@@ -144,10 +146,10 @@ bool Processor::Network::SendMessage(const RemoteMessage& msg)
     return true;
 }
 
-bool Processor::Network::SendMessage(const LinkMessage& msg)
+bool Processor::Network::SendMessage(const LinkMessage& msg, size_t min_space)
 {
     assert(m_next != NULL);
-    if (!m_link.out.Write(msg))
+    if (!m_link.out.Push(msg, min_space))
     {
         DeadlockWrite("Unable to buffer link message: %s", msg.str().c_str());
         return false;
@@ -158,7 +160,7 @@ bool Processor::Network::SendMessage(const LinkMessage& msg)
 
 bool Processor::Network::SendAllocResponse(const AllocResponse& msg)
 {
-    if (!m_allocResponse.out.Write(msg))
+    if (!m_allocResponse.out.Push(msg, MINSPACE_INSERTION))
     {
         return false;
     }
@@ -194,7 +196,7 @@ Result Processor::Network::DoSyncs()
     msg.rawreg.value.m_state   = RST_FULL;
     msg.rawreg.value.m_integer = (int)info.broken;
 
-    if (!SendMessage(msg))
+    if (!SendMessage(msg, MINSPACE_INSERTION))
     {
         return FAILED;
     }
@@ -217,7 +219,7 @@ Result Processor::Network::DoSyncs()
 Result Processor::Network::DoAllocResponse()
 {
     assert(!m_allocResponse.in.Empty());
-    AllocResponse msg = m_allocResponse.in.Read();
+    AllocResponse msg = m_allocResponse.in.Front();
     
     const LFID lfid = msg.prev_fid;
     Family& family = m_familyTable[lfid];
@@ -285,7 +287,7 @@ Result Processor::Network::DoAllocResponse()
         fwd.rawreg.value.m_state   = RST_FULL;
         fwd.rawreg.value.m_integer = m_parent.PackFID(fid);
 
-        if (!SendMessage(fwd))
+        if (!SendMessage(fwd, MINSPACE_INSERTION))
         {
             DeadlockWrite("F%u Unable to send remote allocation writeback", (unsigned)lfid);
             return FAILED;
@@ -295,7 +297,7 @@ Result Processor::Network::DoAllocResponse()
                       (unsigned)msg.completion_pid, (unsigned)msg.completion_reg);
     }
     // Forward response
-    else if (!m_allocResponse.out.Write(msg))
+    else if (!m_allocResponse.out.Push(msg, MINSPACE_FORWARD))
     {
         return FAILED;
     }
@@ -303,7 +305,7 @@ Result Processor::Network::DoAllocResponse()
     DebugSimWrite("F%u backward allocation response to CPU%u/F%u", 
                   (unsigned)lfid, (unsigned)(m_parent.GetPID() - 1), (unsigned)msg.prev_fid);
 
-    m_allocResponse.in.Clear();
+    m_allocResponse.in.Pop();
     return SUCCESS;
 }
 
@@ -385,7 +387,7 @@ bool Processor::Network::WriteRegister(LFID fid, RemoteRegType kind, const RegAd
 }
 
 
-bool Processor::Network::OnSync(LFID fid, PID completion_pid, RegIndex completion_reg)
+bool Processor::Network::OnSync(LFID fid, PID completion_pid, RegIndex completion_reg, size_t min_space)
 {
     Family& family = m_familyTable[fid];
     if (family.link != INVALID_LFID)
@@ -397,7 +399,7 @@ bool Processor::Network::OnSync(LFID fid, PID completion_pid, RegIndex completio
         fwd.sync.completion_pid = completion_pid;
         fwd.sync.completion_reg = completion_reg;
 
-        if (!SendMessage(fwd))
+        if (!SendMessage(fwd, min_space))
         {
             DeadlockWrite("Unable to forward sync onto link");
             return false;
@@ -440,7 +442,7 @@ bool Processor::Network::OnSync(LFID fid, PID completion_pid, RegIndex completio
     return true;
 }
 
-bool Processor::Network::OnDetach(LFID fid)
+bool Processor::Network::OnDetach(LFID fid, size_t min_space)
 {
     if (!m_allocator.DecreaseFamilyDependency(fid, FAMDEP_DETACHED))
     {
@@ -455,7 +457,7 @@ bool Processor::Network::OnDetach(LFID fid)
         LinkMessage msg;
         msg.type = LinkMessage::MSG_DETACH;
         msg.detach.fid = family.link;
-        if (!SendMessage(msg))
+        if (!SendMessage(msg, min_space))
         {
             return false;
         }
@@ -465,7 +467,7 @@ bool Processor::Network::OnDetach(LFID fid)
     return true;
 }
 
-bool Processor::Network::OnBreak(LFID fid)
+bool Processor::Network::OnBreak(LFID fid, size_t min_space)
 {
     Family& family = m_familyTable[fid];
 
@@ -484,7 +486,7 @@ bool Processor::Network::OnBreak(LFID fid)
         msg.type    = LinkMessage::MSG_BREAK;
         msg.brk.fid = family.link;
 		
-        if (!SendMessage(msg))
+        if (!SendMessage(msg, min_space))
         {
             DeadlockWrite("F%u unable to send break message to next processor", (unsigned)fid);
             return false;
@@ -501,18 +503,18 @@ Result Processor::Network::DoDelegationOut()
 {
     // Send outgoing message over the delegation network
     assert(!m_delegateOut.Empty());
-    const DelegateMessage& msg = m_delegateOut.Read();
+    const DelegateMessage& msg = m_delegateOut.Front();
     assert(msg.src == m_parent.GetPID());
-    assert(msg.dest != m_parent.GetPID());
+    // assert(msg.dest != m_parent.GetPID());
 
     // Send to destination
-    if (!m_grid[msg.dest]->GetNetwork().m_delegateIn.Write(msg))
+    if (!m_grid[msg.dest]->GetNetwork().m_delegateIn.Push(msg, MINSPACE_FORWARD))
     {
         DeadlockWrite("Unable to buffer outgoing delegation message into destination input buffer");
         return FAILED;
     }
     
-    m_delegateOut.Clear();
+    m_delegateOut.Pop();
     return SUCCESS;
 }
 
@@ -522,8 +524,8 @@ Result Processor::Network::DoDelegationIn()
     // Note that we make a copy here, because we want to clear it before
     // we process it, because we may overwrite the entry during processing.
     assert(!m_delegateIn.Empty());
-    DelegateMessage msg = m_delegateIn.Read();
-    m_delegateIn.Clear();
+    DelegateMessage msg = m_delegateIn.Front();
+    m_delegateIn.Pop();
     assert(msg.dest == m_parent.GetPID());
 
     DebugNetWrite("accepted delegation message %s", msg.str().c_str());
@@ -546,7 +548,7 @@ Result Processor::Network::DoDelegationIn()
                 fwd.ballocate.completion_pid = msg.allocate.completion_pid;
                 fwd.ballocate.completion_reg = msg.allocate.completion_reg;
                 
-                if (!SendMessage(fwd))
+                if (!SendMessage(fwd, MINSPACE_INSERTION))
                 {
                     return FAILED;
                 }
@@ -604,7 +606,7 @@ Result Processor::Network::DoDelegationIn()
             fwd.property.type  = msg.property.type;
             fwd.property.value = msg.property.value;
             
-            if (!SendMessage(fwd))
+            if (!SendMessage(fwd, MINSPACE_INSERTION))
             {
                 return FAILED;
             }
@@ -638,7 +640,7 @@ Result Processor::Network::DoDelegationIn()
     case DelegateMessage::MSG_SYNC:
         // Authorize family access
         m_allocator.GetFamilyChecked(msg.sync.fid.lfid, msg.sync.fid.capability);
-        if (!OnSync(msg.sync.fid.lfid, msg.src, msg.sync.completion_reg))
+        if (!OnSync(msg.sync.fid.lfid, msg.src, msg.sync.completion_reg, MINSPACE_INSERTION))
         {
             return FAILED;
         }
@@ -647,7 +649,7 @@ Result Processor::Network::DoDelegationIn()
     case DelegateMessage::MSG_DETACH:
         // Authorize family access
         m_allocator.GetFamilyChecked(msg.detach.fid.lfid, msg.detach.fid.capability);
-        if (!OnDetach(msg.detach.fid.lfid))
+        if (!OnDetach(msg.detach.fid.lfid, MINSPACE_INSERTION))
         {
             return FAILED;
         }
@@ -656,7 +658,7 @@ Result Processor::Network::DoDelegationIn()
     case DelegateMessage::MSG_BREAK:
         // A break can only be sent from the family itself,
         // so no capability-verification has to be done.
-        if (!OnBreak(msg.brk.fid))
+        if (!OnBreak(msg.brk.fid, MINSPACE_INSERTION))
         {
             return FAILED;
         }
@@ -702,7 +704,7 @@ Result Processor::Network::DoDelegationIn()
                 fwd.global.fid   = family.link;
                 fwd.global.addr  = msg.famreg.addr;
                 fwd.global.value = msg.famreg.value;
-                if (!SendMessage(fwd))
+                if (!SendMessage(fwd, MINSPACE_INSERTION))
                 {
                     return FAILED;
                 }           
@@ -722,7 +724,7 @@ Result Processor::Network::DoDelegationIn()
                 return FAILED;
             }
 
-            if (!SendMessage(response))
+            if (!SendMessage(response, MINSPACE_FORWARD))
             {
                 DeadlockWrite("Unable to buffer outgoing remote register response");
                 return FAILED;
@@ -743,7 +745,7 @@ Result Processor::Network::DoLink()
 {
     // Handle incoming message from the link
     assert(!m_link.in.Empty());
-    const LinkMessage& msg = m_link.in.Read();
+    const LinkMessage& msg = m_link.in.Front();
 
     DebugNetWrite("accepted link message %s", msg.str().c_str());
     
@@ -776,7 +778,7 @@ Result Processor::Network::DoLink()
                     fwd.ballocate.min_pid      = m_parent.GetPID();
                 }
                 
-                if (!SendMessage(fwd))
+                if (!SendMessage(fwd, MINSPACE_FORWARD))
                 {
                     return FAILED;
                 }
@@ -799,7 +801,7 @@ Result Processor::Network::DoLink()
         rmsg.allocate.type           = ALLOCATE_SINGLE;
         rmsg.allocate.completion_pid = msg.ballocate.completion_pid;
         rmsg.allocate.completion_reg = msg.ballocate.completion_reg;
-        if (!SendMessage(rmsg))
+        if (!SendMessage(rmsg, MINSPACE_INSERTION))
         {
             return FAILED;
         }
@@ -828,7 +830,7 @@ Result Processor::Network::DoLink()
             // Forward message on link
             LinkMessage fwd(msg);
             fwd.property.fid = family.link;
-            if (!SendMessage(fwd))
+            if (!SendMessage(fwd, MINSPACE_FORWARD))
             {
                 return FAILED;
             }
@@ -847,7 +849,7 @@ Result Processor::Network::DoLink()
             {
                 LinkMessage fwd(msg);
                 fwd.create.fid = family.link;
-                if (!SendMessage(fwd))
+                if (!SendMessage(fwd, MINSPACE_FORWARD))
                 {
                     DeadlockWrite("Unable to forward restrict message");
                     return FAILED;
@@ -882,14 +884,14 @@ Result Processor::Network::DoLink()
         break;
     }   
     case LinkMessage::MSG_SYNC:
-        if (!OnSync(msg.sync.fid, msg.sync.completion_pid, msg.sync.completion_reg))
+        if (!OnSync(msg.sync.fid, msg.sync.completion_pid, msg.sync.completion_reg, MINSPACE_FORWARD))
         {
             return FAILED;
         }
         break;
     
     case LinkMessage::MSG_DETACH:
-        if (!OnDetach(msg.detach.fid))
+        if (!OnDetach(msg.detach.fid, MINSPACE_FORWARD))
         {
             return FAILED;
         }
@@ -908,7 +910,7 @@ Result Processor::Network::DoLink()
             // Forward on link as well
             LinkMessage fwd(msg);
             fwd.global.fid = family.link;
-            if (!SendMessage(fwd))
+            if (!SendMessage(fwd, MINSPACE_FORWARD))
             {
                 return FAILED;
             }           
@@ -917,7 +919,7 @@ Result Processor::Network::DoLink()
     }
 
     case LinkMessage::MSG_BREAK:
-        if (!OnBreak(msg.brk.fid))
+        if (!OnBreak(msg.brk.fid, MINSPACE_FORWARD))
         {
             return FAILED;
         }
@@ -928,7 +930,7 @@ Result Processor::Network::DoLink()
         break;
     }
 
-    m_link.in.Clear();
+    m_link.in.Pop();
     return SUCCESS;
 }
 
@@ -948,8 +950,8 @@ void Processor::Network::Cmd_Read(ostream& out, const vector<string>& /* argumen
 {
     const struct {
         const char*                      name;
-        const Simulator::Register<DelegateMessage>& reg;
-    } Registers[2] = {
+        const Simulator::Buffer<DelegateMessage>& buf;
+    } Buffers[2] = {
         {"Incoming", m_delegateIn},
         {"Outgoing", m_delegateOut}
     };
@@ -957,9 +959,9 @@ void Processor::Network::Cmd_Read(ostream& out, const vector<string>& /* argumen
     out << dec;
     for (size_t i = 0; i < 2; ++i)
     {
-        out << Registers[i].name << " delegation network:" << endl;
-        if (!Registers[i].reg.Empty()) {
-            const DelegateMessage& msg = Registers[i].reg.Read();
+        out << Buffers[i].name << " delegation network:" << endl;
+        if (!Buffers[i].buf.Empty()) {
+            const DelegateMessage& msg = Buffers[i].buf.Front();
             out << msg.str();
         } else {
             out << "Empty";
@@ -969,18 +971,18 @@ void Processor::Network::Cmd_Read(ostream& out, const vector<string>& /* argumen
 
     const struct {
         const char*                  name;
-        const Register<LinkMessage>& reg;
-    } LinkRegisters[2] = {
+        const Buffer<LinkMessage>&   buf;
+    } LinkBuffers[2] = {
         {"Incoming", m_link.in},
         {"Outgoing", m_link.out}
     };
     
     for (size_t i = 0; i < 2; ++i)
     {
-        out << LinkRegisters[i].name << " link:" << endl;
+        out << LinkBuffers[i].name << " link:" << endl;
         out << dec;
-        if (!LinkRegisters[i].reg.Empty()) {
-            const LinkMessage& msg = LinkRegisters[i].reg.Read();
+        if (!LinkBuffers[i].buf.Empty()) {
+            const LinkMessage& msg = LinkBuffers[i].buf.Front();
             out << msg.str();
         } else {
             out << "Empty";

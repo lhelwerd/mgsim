@@ -9,6 +9,9 @@ using namespace std;
 namespace Simulator
 {
 
+static const size_t MINSPACE_INSERTION = 2;
+static const size_t MINSPACE_FORWARD   = 1;
+
 /// String representation for the AllocationType enumeration
 static const char* const AllocationTypes[] = {
     "Normal", "Exact", "Balanced", "Single"
@@ -520,7 +523,7 @@ bool Processor::Allocator::DecreaseFamilyDependency(LFID fid, Family& family, Fa
                 msg.done.fid    = family.link;
                 msg.done.broken = family.broken;
 
-                if (!m_network.SendMessage(msg))
+                if (!m_network.SendMessage(msg, MINSPACE_INSERTION))
                 {
                     DeadlockWrite("F%u unable to buffer termination to next processor",
                                   (unsigned)fid);
@@ -1160,7 +1163,7 @@ Result Processor::Allocator::DoFamilyAllocate()
             msg.rawreg.value.m_state   = RST_FULL;
             msg.rawreg.value.m_integer = m_parent.PackFID(fid);
             
-            if (!m_network.SendMessage(msg))
+            if (!m_network.SendMessage(msg, MINSPACE_INSERTION))
             {
                 DeadlockWrite("Unable to send remote allocation writeback");
                 return FAILED;
@@ -1217,7 +1220,7 @@ Result Processor::Allocator::DoFamilyAllocate()
                 msg.rawreg.value.m_state   = RST_FULL;
                 msg.rawreg.value.m_integer = m_parent.PackFID(fid);
         
-                if (!m_network.SendMessage(msg))
+                if (!m_network.SendMessage(msg, MINSPACE_INSERTION))
                 {
                     DeadlockWrite("Unable to send remote allocation writeback");
                     return FAILED;
@@ -1266,7 +1269,7 @@ Result Processor::Allocator::DoFamilyAllocate()
             msg.create.completion_pid = req.completion_pid;
             
             
-            if (!m_network.SendMessage(msg))
+            if (!m_network.SendMessage(msg, MINSPACE_INSERTION))
             {
                 DeadlockWrite("Unable to send remote bundle allocation");
                 return FAILED;
@@ -1289,7 +1292,7 @@ Result Processor::Allocator::DoFamilyAllocate()
         msg.allocate.completion_reg = req.completion_reg;
         
         
-        if (!m_network.SendMessage(msg))
+        if (!m_network.SendMessage(msg, MINSPACE_INSERTION))
         {
             DeadlockWrite("Unable to forward family allocation requests");
             return FAILED;
@@ -1356,7 +1359,7 @@ bool Processor::Allocator::QueueCreate(const LinkMessage& msg)
         LinkMessage fwd(msg);
         fwd.create.fid      = family.link;
         fwd.create.numCores = (msg.create.numCores > 0) ? msg.create.numCores - 1 : 0;         
-        if (!m_network.SendMessage(fwd))
+        if (!m_network.SendMessage(fwd, MINSPACE_FORWARD))
         {
             return false;
         }
@@ -1485,7 +1488,7 @@ Result Processor::Allocator::DoBundle()
                       (unsigned long long)msg.allocate.bundle.parameter, 
                       (unsigned long long)msg.allocate.bundle.index);
         
-        if (!m_network.SendMessage(msg))
+        if (!m_network.SendMessage(msg, MINSPACE_INSERTION))
         {
             DeadlockWrite("Unable to send indirect creation to CPU%u", (unsigned)msg.allocate.place.pid);
             return FAILED;
@@ -1712,7 +1715,7 @@ Result Processor::Allocator::DoFamilyCreate()
                 msg.create.regs[i] = family.regs[i].count;
             }
         
-            if (!m_network.SendMessage(msg))
+            if (!m_network.SendMessage(msg, MINSPACE_INSERTION))
             {
                 DeadlockWrite("Unable to send the create for F%u", (unsigned)info.fid);
                 return FAILED;
@@ -1814,7 +1817,7 @@ Result Processor::Allocator::DoFamilyCreate()
             msg.rawreg.value.m_state    = RST_FULL;
             msg.rawreg.value.m_integer  = m_parent.PackFID(fid);
             
-            if (!m_network.SendMessage(msg))
+            if (!m_network.SendMessage(msg, MINSPACE_INSERTION))
             {
                 DeadlockWrite("Unable to send creation completion to CPU%u", (unsigned)info.completion_pid);
                 return FAILED;
