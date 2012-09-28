@@ -194,7 +194,7 @@ AC_ARG_ENABLE([cacti],
               [AC_HELP_STRING([--disable-cacti], [disable support for area calculations with CACTI (default is try to enable)])],
               [], [enable_cacti=yes])
 if test "x$enable_cacti" = "xyes"; then
-  if ! test -d "$srcdir/cacti"; then
+  if ! test -r "$srcdir/cacti/cacti_interface.h"; then
      AC_MSG_WARN([CACTI sources not available, cannot use CACTI.])
      enable_cacti=no
   fi
@@ -229,7 +229,7 @@ mtalpha)
   fi
 
   AC_DEFINE([TARGET_MTALPHA], [1],
-            [Define when building a simulator for MT-Sparc.])
+            [Define when building a simulator for MT-Alpha.])
 
   ;;
 
@@ -246,7 +246,7 @@ mtsparc)
   fi
 
   AC_DEFINE([TARGET_MTSPARC], [1],
-            [Define when building a simulator for MT-Alpha.])
+            [Define when building a simulator for MT-SPARC.])
   ;;
 
 *)
@@ -291,14 +291,9 @@ fi
 
 AM_CONDITIONAL([ENABLE_C_TESTS], [test x$enable_compiled_tests = xyes])
 
-
-AC_CONFIG_LINKS([arch/proc/ISA.h:arch/proc/ISA.$target_cpu.h
-                 arch/proc/ISA.cpp:arch/proc/ISA.$target_cpu.cpp])
-
 AC_CONFIG_FILES([
 	Makefile
 	tools/Makefile
-        tests/Makefile
 	programs/Makefile
 	doc/Makefile
 ])
