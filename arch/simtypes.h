@@ -268,7 +268,11 @@ enum RegClass
 // ISA-specific function to map virtual registers to register classes
 extern unsigned char GetRegisterClass(unsigned char addr, const RegsNo& regs, RegClass* rc);
 
+#if defined(TARGET_MIPS32) || defined(TARGET_MIPS32EL)
+static RegIndex INVALID_REG_INDEX = 0;
+#else
 static RegIndex INVALID_REG_INDEX = (RegIndex)-1;
+#endif
 
 struct RegAddr
 {
