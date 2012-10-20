@@ -225,9 +225,9 @@ Result Processor::Pipeline::DoPipeline()
         {
             // Add details about thread, family and PC
             stringstream details;
-            details << "While executing instruction at " << GetProcessor().GetSymbolTable()[stage->input->pc_dbg] 
-                        // "0x" << setw(sizeof(MemAddr) * 2) << setfill('0') << hex << stage->input->pc_dbg
-                    << " in T" << dec << stage->input->tid << " in F" << stage->input->fid;
+            details << "While executing instruction at " << GetProcessor().GetSymbolTable()[stage->input->pc_dbg]
+                    << " (0x" << hex << stage->input->pc_dbg
+                    << ") in T" << dec << stage->input->tid << " in F" << stage->input->fid;
             e.AddDetails(details.str());
         }
         throw;
