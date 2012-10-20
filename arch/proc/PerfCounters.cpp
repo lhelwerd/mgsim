@@ -7,7 +7,7 @@
 namespace Simulator
 {
 
-#define NUM_COUNTERS 18
+#define NUM_COUNTERS 21
 
 size_t Processor::PerfCounters::GetSize() const { return NUM_COUNTERS * sizeof(Integer);  }
 
@@ -214,22 +214,22 @@ Result Processor::PerfCounters::Read(MemAddr address, void *data, MemSize size, 
     break;
     case 18:
     {
-        // Return the number of created families
+        // Return the number of created threads
         Integer tc = 0;
         for (size_t i = placeStart; i < placeEnd; ++i)
         {
-            tc += cpu.m_grid[i]->GetTotalFamiliesCreated();
+            tc += cpu.m_grid[i]->GetTotalThreadsCreated();
         }
         value = tc;
     }
     break;
     case 19:
     {
-        // Return the number of created threads
+        // Return the number of created families
         Integer fc = 0;
         for (size_t i = placeStart; i < placeEnd; ++i)
         {
-            fc += cpu.m_grid[i]->GetTotalThreadsCreated();
+            fc += cpu.m_grid[i]->GetTotalFamiliesCreated();
         }
         value = fc;
     }
