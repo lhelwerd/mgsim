@@ -44,9 +44,9 @@ AC_ARG_ENABLE([extra-warnings],
 
 WARN_CXXFLAGS=
 if test "x$GXX" = xyes; then
-  WARN_CXXFLAGS="-W -Wall -Wextra -Wundef -Wshadow -Wpointer-arith -Wmissing-declarations -Wwrite-strings"
+  WARN_CXXFLAGS="-W -Wall -Wextra -Wundef -Wpointer-arith -Wwrite-strings"
   if test "x$enable_extra_warnings" = "xyes"; then
-    WARN_CXXFLAGS="$WARN_CXXFLAGS -Weffc++"
+    WARN_CXXFLAGS="$WARN_CXXFLAGS -Weffc++ -Wshadow -Wmissing-declarations"
   fi
 fi
 AC_SUBST([WARN_CXXFLAGS])
