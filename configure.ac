@@ -37,9 +37,17 @@ MY_OPT_PROG([rst2man], [reStructuredText to manpage converter], [rst2man rst2man
 AC_LANG_PUSH([C++])
 AC_PROG_CXX
 
+AC_ARG_ENABLE([extra-warnings],
+              [AC_HELP_STRING([--enable-extra-warnings],  
+                              [enable development warnings])],
+              [], [enable_extra_warnings=no])
+
 WARN_CXXFLAGS=
 if test "x$GXX" = xyes; then
-  WARN_CXXFLAGS="-W -Wall -Wextra -Weffc++ -Wundef -Wshadow -Wpointer-arith -Wmissing-declarations -Wwrite-strings"
+  WARN_CXXFLAGS="-W -Wall -Wextra -Wundef -Wshadow -Wpointer-arith -Wmissing-declarations -Wwrite-strings"
+  if test "x$enable_extra_warnings" = "xyes"; then
+    WARN_CXXFLAGS="$WARN_CXXFLAGS -Weffc++"
+  fi
 fi
 AC_SUBST([WARN_CXXFLAGS])
 
